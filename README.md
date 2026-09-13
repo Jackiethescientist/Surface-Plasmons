@@ -29,7 +29,7 @@ Here:
 
 ## Current Features
 
-Version `0.1.1` currently provides:
+Version `0.1.2` currently provides:
 
 * complex metal permittivity using the Drude model
 * planar metal–dielectric SPP wavevector calculations
