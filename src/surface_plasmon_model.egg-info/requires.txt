@@ -1,0 +1,7 @@
+numpy
+scipy
+matplotlib
+pandas
+
+[dev]
+pytest>=8

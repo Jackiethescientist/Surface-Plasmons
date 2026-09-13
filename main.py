@@ -2,8 +2,10 @@ import numpy as np
 
 from scipy.constants import c
 
-from src.drude_model import drude_permittivity
-from src.spp import spp_wavevector
+from surface_plasmon_model import (
+    drude_permittivity,
+    spp_wavevector,
+)
 
 
 wavelength = 632.8e-9
