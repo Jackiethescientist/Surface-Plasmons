@@ -4,11 +4,15 @@ channels:
   - conda-forge
 
 dependencies:
-  - python
+  - python=3.12
   - pymeep
-  - numpy
-  - scipy
-  - matplotlib
-  - pandas
-  - jupyter
+  - numpy>=1.24
+  - scipy>=1.10
+  - matplotlib>=3.7
+  - pandas>=2
+  - jupyterlab>=4
+  - ipykernel
+  - pytest>=8
+  - build>=1.2
+  - twine>=5
   - pip

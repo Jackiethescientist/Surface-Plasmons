@@ -1,18 +1,19 @@
-name: Publish Python package
+name: Release
 
 on:
   release:
-    types: [published]
+    types:
+      - published
+
+permissions:
+  contents: read
 
 jobs:
-  publish:
-    name: Test, build and publish to PyPI
+  build-and-publish:
     runs-on: ubuntu-latest
-
     environment:
       name: pypi
       url: https://pypi.org/p/surface-plasmon-model
-
     permissions:
       contents: read
       id-token: write
@@ -24,22 +25,40 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.12"
 
-      - name: Install development tools
+      - name: Install project
         run: |
           python -m pip install --upgrade pip
-          python -m pip install build twine
           python -m pip install -e ".[dev]"
 
-      - name: Run tests
-        run: python -m pytest -v
+      - name: Verify release tag matches package version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python - <<'PY'
+          import os
+          import tomllib
 
-      - name: Build package
+          with open("pyproject.toml", "rb") as file:
+              package_version = tomllib.load(file)["project"]["version"]
+
+          release_version = os.environ["RELEASE_TAG"].removeprefix("v")
+          if release_version != package_version:
+              raise SystemExit(
+                  f"Release tag {release_version!r} does not match "
+                  f"package version {package_version!r}."
+              )
+          PY
+
+      - name: Run tests
+        run: pytest
+
+      - name: Build distributions
         run: python -m build
 
       - name: Check distributions
         run: python -m twine check dist/*
 
-      - name: Publish package to PyPI
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

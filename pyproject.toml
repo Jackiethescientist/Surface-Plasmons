@@ -2,53 +2,68 @@
 requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
-
 [project]
 name = "surface-plasmon-model"
-version = "0.1.2"
-
-description = "Python tools for modeling surface plasmon polaritons at metal-dielectric interfaces"
-
+version = "0.2.0"
+description = "Simulation, persistence, analysis, parameter sweeps, and visualization for surface-plasmon systems."
 readme = "README.md"
 requires-python = ">=3.10"
-
 license = "MIT"
 license-files = ["LICENSE"]
-
 authors = [
-    {name = "Jacqueline Zhang"}
+  { name = "Jacqueline Zhang" }
 ]
-
 keywords = [
-    "surface plasmons",
-    "surface plasmon polaritons",
-    "plasmonics",
-    "optics",
-    "electromagnetism",
-    "Drude model"
+  "surface plasmons",
+  "plasmonics",
+  "electromagnetics",
+  "FDTD",
+  "MEEP",
+  "nanophotonics",
 ]
-
 dependencies = [
-    "numpy",
-    "scipy",
-    "matplotlib",
-    "pandas"
+  "numpy>=1.24",
+  "scipy>=1.10",
+  "matplotlib>=3.7",
 ]
-
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Science/Research",
-    "Programming Language :: Python :: 3",
-    "Topic :: Scientific/Engineering :: Physics"
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Scientific/Engineering :: Physics",
 ]
-
 
 [project.optional-dependencies]
+notebooks = [
+  "jupyterlab>=4",
+  "pandas>=2",
+]
 dev = [
-    "pytest>=8"
+  "build>=1.2",
+  "pytest>=8",
+  "twine>=5",
 ]
 
+[project.urls]
+Homepage = "https://github.com/Jackiethescientist/Surface__Plasmons"
+Repository = "https://github.com/Jackiethescientist/Surface__Plasmons"
+Issues = "https://github.com/Jackiethescientist/Surface__Plasmons/issues"
+Changelog = "https://github.com/Jackiethescientist/Surface__Plasmons/blob/master/CHANGELOG.md"
+
+[tool.setuptools]
+include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["surface_plasmons*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
