@@ -97,10 +97,10 @@ Inspect the available registries without starting MEEP:
 from surface_plasmons import list_geometries, list_materials
 
 for material in list_materials():
-    print(material.name, material.category, material.wavelength_range_um)
+    print(material.key, material.category, material.valid_wavelength_um)
 
 for geometry in list_geometries():
-    print(geometry.name, geometry.category, geometry.dimensions)
+    print(geometry.key, geometry.category, geometry.dimensions)
 ~~~
 
 Use material_catalog() and geometry_catalog() when a JSON-ready mapping is more convenient.

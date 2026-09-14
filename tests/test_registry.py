@@ -19,14 +19,14 @@ def test_material_registry_is_available_without_importing_meep() -> None:
     materials = list_materials()
 
     assert len(materials) >= 65
-    assert get_material_spec(materials[0].name) == materials[0]
+    assert get_material_spec(materials[0].key) == materials[0]
 
 
 def test_geometry_registry_and_parameter_validation() -> None:
     geometries = list_geometries()
 
     assert len(geometries) >= 25
-    assert get_geometry_spec("nanoparticle_sphere").name == "nanoparticle_sphere"
+    assert get_geometry_spec("nanoparticle_sphere").key == "nanoparticle_sphere"
 
     parameters = validate_geometry_parameters(
         "nanoparticle_sphere",
