@@ -1,9 +1,10 @@
-"""Small end-to-end example. Run this file from the project root."""
+"""Run a resumable radius sweep, analyse one run, and save figures."""
 
-from surface_plasmons.analysis import analyze_run, export_analysis
-from surface_plasmons.sweep import parameter_sweep
-from surface_plasmons.visualization import (
+from surface_plasmons import (
+    analyze_run,
     create_run_summary_figure,
+    export_analysis,
+    parameter_sweep,
     plot_sweep_1d,
 )
 
@@ -28,34 +29,46 @@ def main() -> None:
             },
         },
         parameters={
-            "geometry_parameters.radius": [0.03, 0.04, 0.05],
+            "geometry_parameters.radius": [0.030, 0.040, 0.050],
         },
         name="gold_sphere_radius",
+        sweep_id="gold_sphere_radius",
         workers=1,
+        resume=True,
     )
     print(f"Sweep: {sweep.status}")
     print(f"Manifest: {sweep.manifest_path}")
 
-    completed = [run for run in sweep.runs if run.run_id]
+    completed = [
+        run
+        for run in sweep.runs
+        if run.status in {"completed", "skipped"} and run.run_id
+    ]
     if not completed:
         print("No completed run was available to analyse.")
         return
 
     run_id = completed[0].run_id
-    report = analyze_run(run_id)
-    export_analysis(report, f"data/results/analysis/{run_id}.json")
-    create_run_summary_figure(
-        run_id,
-        save_path=f"data/results/images/{run_id}_summary.png",
+    analysis_path = export_analysis(
+        analyze_run(run_id),
+        f"data/results/analysis/{run_id}.json",
     )
+    summary_path = f"data/results/images/{run_id}_summary.png"
+    sweep_plot_path = "data/results/images/radius_vs_absorption.png"
+
+    create_run_summary_figure(run_id, save_path=summary_path)
     plot_sweep_1d(
         sweep,
         parameter="geometry_parameters.radius",
         metric="absorption_maximum",
         parameter_label="Sphere radius (µm)",
         metric_label="Maximum absorption",
-        save_path="data/results/images/radius_vs_absorption.png",
+        save_path=sweep_plot_path,
     )
+
+    print(f"Analysis: {analysis_path}")
+    print(f"Run figure: {summary_path}")
+    print(f"Sweep figure: {sweep_plot_path}")
 
 
 if __name__ == "__main__":

@@ -1,31 +1,34 @@
-# Python
+# Python bytecode and caches
 __pycache__/
 *.py[cod]
-
-# Testing
 .pytest_cache/
-.coverage
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
 
-# Packaging
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Packaging and coverage
 build/
 dist/
 *.egg-info/
-
-# Conda / virtual environments
-.venv/
-venv/
-
-# MEEP output
-*.h5
+.coverage
+.coverage.*
+htmlcov/
 
 # Jupyter
 .ipynb_checkpoints/
 
-# Simulation outputs
-data/results/
-*.h5
-data/simulations.db
-
-# OS files
+# Editors and operating systems
+.idea/
 .DS_Store
 Thumbs.db
+
+# Generated simulation data
+data/results/
+data/simulations.db*
+*.h5
