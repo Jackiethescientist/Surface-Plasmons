@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Testing
+.pytest_cache/
+.coverage
+
+# Packaging
+build/
+dist/
+*.egg-info/
+
+# Conda / virtual environments
+.venv/
+venv/
+
+# MEEP output
+*.h5
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Simulation outputs
+data/results/
+*.h5
+data/simulations.db
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,14 @@
+name: plasmon
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python
+  - pymeep
+  - numpy
+  - scipy
+  - matplotlib
+  - pandas
+  - jupyter
+  - pip

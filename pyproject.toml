@@ -51,4 +51,4 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["surface_plasmon_model*"]
+include = ["surface_plasmons*"]
