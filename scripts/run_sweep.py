@@ -62,7 +62,7 @@ BASE_CONFIG: dict[str, Any] = {
     "resolution": 80,
     "source": {
         "wavelength_range_um": [0.45, 0.80],
-        "component": ["Ex", "Ey", "Ez"]
+        "component": "Ez",
     },
     "flux": {
         "nfreq": 101,
@@ -76,7 +76,7 @@ BASE_CONFIG: dict[str, Any] = {
         "save_fields": True,
         "save_images": True,
         # Save all electric components for total |E|^2 field enhancement.
-        "field_components": "Ez",
+        "field_components": ["Ex", "Ey", "Ez"],
     },
     "notes": "",
     "tags": ["sweep", "research", "3d"],
