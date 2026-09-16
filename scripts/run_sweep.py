@@ -75,8 +75,7 @@ BASE_CONFIG: dict[str, Any] = {
     "tags": ["sweep", "research", "3d"],
 }
 
-# These are the independent variables from the research-aim discussion.
-# Values shown here are examples; edit them for the actual experiment.
+
 SWEEP_VARIABLES: dict[str, dict[str, Any]] = {
     "particle_material": {
         "path": "geometry.parameters.particle",
