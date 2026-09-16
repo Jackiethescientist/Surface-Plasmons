@@ -1,12 +1,6 @@
-"""Version 3: run one named 3-D simulation and export the research variables.
-
-Edit ``SIMULATION_CONFIG`` below, then run from the project root:
-
-    python scripts/run_single_v3.py
-
-The research CSV contains only the independent and dependent variables chosen
-for this project.  Internal MEEP files remain available for reproducibility,
-but numerical run-time/debug metrics are not copied into the research CSV.
+"""
+Run a single simulation for research purposes, producing a CSV of results and
+automatic visualisations.  The simulation is defined by a configuration dictionary
 """
 
 from __future__ import annotations
@@ -73,10 +67,6 @@ RESONANCE_RESPONSE = "auto"
 PEAK_PROMINENCE: float | None = None
 MAXIMUM_MODES = 10
 
-
-# ---------------------------------------------------------------------------
-# RESEARCH RESULT DEFINITIONS -- shared with run_sweep.py
-# ---------------------------------------------------------------------------
 
 RESEARCH_SPECTRA = ("absorption", "scattering", "extinction")
 

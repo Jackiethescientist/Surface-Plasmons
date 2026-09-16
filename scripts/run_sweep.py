@@ -1,13 +1,6 @@
-"""Version 3: run a 3-D one-parameter or Cartesian-grid plasmonic sweep.
-
-The only line normally changed between a 1-D sweep and a grid sweep is:
-
-    ACTIVE_SWEEP_PARAMETERS = ["particle_size"]
-
-or, for example:
-
-    ACTIVE_SWEEP_PARAMETERS = ["particle_material", "particle_size"]
-
+"""Run a parameter sweep for research purposes, producing a single CSV of results and
+automatic visualisations.  The sweep is defined by a base configuration plus a set of
+independent variables.  
 One active variable produces line/scatter plots.  Two variables produce 2-D
 heatmaps.  Three or more variables produce pairwise heatmaps, averaged over
 the other active variables.  All combinations are simulated (a Cartesian grid).
@@ -196,10 +189,7 @@ PLOT_RESULTS = {
     "number_of_modes": "Number of modes",
 }
 
-
-# ---------------------------------------------------------------------------
-# RUNNER CODE -- normally you do not need to edit below this line
-# ---------------------------------------------------------------------------
+# RUNNER CODE BELOW --------------------------------------------------------------
 
 EXCEL_MAX_DATA_ROWS = 1_048_575
 
