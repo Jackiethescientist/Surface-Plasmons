@@ -1,0 +1,77 @@
+{
+  "background": {
+    "material": "air",
+    "parameter": "background"
+  },
+  "cache_schema": 1,
+  "cell_size_um": [
+    1.08,
+    1.08,
+    1.08
+  ],
+  "courant": 0.45,
+  "dimensions": 3,
+  "flux": {
+    "enabled": true,
+    "input_name": "input_flux",
+    "input_position_um": null,
+    "nfreq": 101,
+    "normalization": "empty_cell",
+    "output_name": "output_flux",
+    "output_position_um": null
+  },
+  "flux_positions_um": {
+    "input_flux": [
+      0.0,
+      0.0,
+      -0.10800000000000001
+    ],
+    "output_flux": [
+      0.0,
+      0.0,
+      0.10800000000000001
+    ]
+  },
+  "force_complex_fields": false,
+  "geometry_name": "nanoparticle_sphere",
+  "k_point": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "kind": "broadband_flux",
+  "meep_version": "1.34.0",
+  "pml_axes": null,
+  "pml_thickness_um": 0.2,
+  "processors": 1,
+  "resolution": 60,
+  "source": {
+    "amplitude": 1.0,
+    "axis": "z",
+    "center_um": null,
+    "component": "Ez",
+    "cutoff": 5.0,
+    "direction": null,
+    "is_integrated": true,
+    "kind": "gaussian",
+    "offset_from_pml_um": 0.05,
+    "size_um": null,
+    "wavelength_range_um": [
+      0.45,
+      0.8
+    ]
+  },
+  "source_axis": "z",
+  "source_center_um": [
+    0.0,
+    0.0,
+    -0.29000000000000004
+  ],
+  "source_direction": 1,
+  "stopping": {
+    "dft_decay_tolerance": 1e-05,
+    "maximum_run_time": 100.0,
+    "method": "dft_decay",
+    "minimum_run_time": 20.0
+  }
+}

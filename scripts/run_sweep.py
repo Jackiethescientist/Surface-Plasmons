@@ -1,9 +1,16 @@
-"""Run a parameter sweep for research purposes, producing a single CSV of results and
-automatic visualisations.  The sweep is defined by a base configuration plus a set of
-independent variables.  
+"""
 One active variable produces line/scatter plots.  Two variables produce 2-D
 heatmaps.  Three or more variables produce pairwise heatmaps, averaged over
 the other active variables.  All combinations are simulated (a Cartesian grid).
+
+Examples:
+
+    python scripts/run_sweep_v5.py --precision fast --field-maps none
+    python scripts/run_sweep_v5.py --precision sweep --field-points first,middle,last
+    python scripts/run_sweep_v5.py --precision final --field-points 1,9,17
+
+Compatible empty-cell calculations are cached. Estimated wall-time ranges are
+printed before each solver stage and calibrate after the first completed stage.
 """
 
 from __future__ import annotations
@@ -26,10 +33,16 @@ from surface_plasmons.sweep import SweepResult, parameter_sweep
 
 # Both files belong in the same scripts/ folder.
 from run_single import (
+    PRECISION_MODES,
+    REFERENCE_CACHE_ENABLED,
     RESEARCH_CSV_COLUMNS,
+    apply_broadband_precision,
     analyze_research_result,
+    get_precision_profile,
+    run_resonance_field_stage,
     research_rows,
     safe_name,
+    simulation_runtime_features,
 )
 
 
@@ -37,7 +50,14 @@ from run_single import (
 # EDIT THIS SECTION FOR EACH SWEEP
 # ---------------------------------------------------------------------------
 
-DEFAULT_SWEEP_NAME = "gold sphere radius sweep"
+DEFAULT_SWEEP_NAME = "gold sphere radius study 3D two stage"
+DEFAULT_SWEEP_PRECISION = "sweep"
+
+# "selected" runs high-resolution field maps only for the listed points.
+# Point numbers are 1-based. The words first, middle and last adapt when the
+# sweep size changes. Other choices are FIELD_MAP_MODE = "all" or "none".
+FIELD_MAP_MODE = "selected"
+SELECTED_FIELD_POINTS: list[str | int] = ["first", "middle", "last"]
 
 # Compact geometry form makes material/background axes easy to combine.
 # All lengths are in micrometres: 0.040 um = 40 nm.
@@ -47,18 +67,22 @@ BASE_CONFIG: dict[str, Any] = {
         "parameters": {
             "particle": "au",
             "background": "air",
-            "radius": 0.020,
+            "radius": 0.040,
         },
     },
     # A real 3-D MEEP domain. Keep workers at 1 until memory use is known.
     "dimensions": 3,
-    "resolution": 80,
+    "resolution": int(PRECISION_MODES[DEFAULT_SWEEP_PRECISION]["broadband_resolution"]),
+    "dft_decay_tolerance": PRECISION_MODES[DEFAULT_SWEEP_PRECISION]["dft_decay_tolerance"],
+    "minimum_run_time": PRECISION_MODES[DEFAULT_SWEEP_PRECISION]["minimum_run_time"],
+    "maximum_run_time": PRECISION_MODES[DEFAULT_SWEEP_PRECISION]["maximum_run_time"],
     "source": {
+        "axis": "z",
         "wavelength_range_um": [0.45, 0.80],
         "component": "Ez",
     },
     "flux": {
-        "nfreq": 101,
+        "nfreq": int(PRECISION_MODES[DEFAULT_SWEEP_PRECISION]["nfreq"]),
         "normalization": "empty_cell",
     },
     "output": {
@@ -66,16 +90,18 @@ BASE_CONFIG: dict[str, Any] = {
         "save_summary": True,   # Required for post-sweep research analysis.
         "save_spectra": True,
         "save_epsilon": False,
-        "save_fields": True,
-        "save_images": True,
+        # Fields are saved only in the higher-resolution resonance stage.
+        "save_fields": False,
+        "save_images": False,
         # Save all electric components for total |E|^2 field enhancement.
         "field_components": ["Ex", "Ey", "Ez"],
     },
     "notes": "",
-    "tags": ["sweep", "research", "3d"],
+    "tags": ["sweep", "research", "3d", "two-stage"],
 }
 
-
+# These are the independent variables from the research-aim discussion.
+# Values shown here are examples; edit them for the actual experiment.
 SWEEP_VARIABLES: dict[str, dict[str, Any]] = {
     "particle_material": {
         "path": "geometry.parameters.particle",
@@ -122,7 +148,7 @@ SWEEP_VARIABLES: dict[str, dict[str, Any]] = {
     "particle_size": {
         # Change this path for a different base geometry, e.g. diameter for a nanorod.
         "path": "geometry.parameters.radius",
-        "values": [0.020, 0.025, 0.030, 0.035, 0.040, 0.045, 0.050, 0.055, 0.060, 0.065, 0.070, 0.075, 0.080, 0.085, 0.090, 0.095, 0.100],
+        "values": [0.020, 0.040, 0.060, 0.080, 0.100],
         "label": "Particle size (µm)",
     },
     "aspect_ratio": {
@@ -188,7 +214,10 @@ PLOT_RESULTS = {
     "number_of_modes": "Number of modes",
 }
 
-# RUNNER CODE BELOW --------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# RUNNER CODE -- normally you do not need to edit below this line
+# ---------------------------------------------------------------------------
 
 EXCEL_MAX_DATA_ROWS = 1_048_575
 
@@ -312,9 +341,55 @@ def _number(value: Any) -> float | None:
     return converted if math.isfinite(converted) else None
 
 
+def resolve_field_point_indices(
+    total_runs: int,
+    mode: str,
+    selections: Sequence[str | int],
+) -> set[int]:
+    """Convert friendly 1-based field-map selections to zero-based run indices."""
+
+    if mode == "none":
+        return set()
+    if mode == "all":
+        return set(range(total_runs))
+    if mode != "selected":
+        raise ValueError("FIELD_MAP_MODE must be selected, all, or none.")
+    if total_runs < 1:
+        return set()
+
+    resolved: set[int] = set()
+    aliases = {
+        "first": 0,
+        "middle": (total_runs - 1) // 2,
+        "last": total_runs - 1,
+    }
+    for selection in selections:
+        text = str(selection).strip().lower()
+        if text in aliases:
+            resolved.add(aliases[text])
+            continue
+        try:
+            point_number = int(text)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid selected field point {selection!r}; use first, middle, last, "
+                "or a 1-based point number."
+            ) from exc
+        if not 1 <= point_number <= total_runs:
+            raise ValueError(
+                f"Selected field point {point_number} is outside 1–{total_runs}."
+            )
+        resolved.add(point_number - 1)
+    return resolved
+
+
 def export_research_results(
     result: SweepResult,
     runtime: Mapping[str, Mapping[str, Any]],
+    *,
+    field_point_indices: set[int],
+    precision: Mapping[str, float | int],
+    cache_enabled: bool,
 ) -> tuple[Path, int, list[dict[str, Any]], list[str]]:
     """Create one long-format CSV containing only the selected research variables."""
 
@@ -340,7 +415,34 @@ def export_research_results(
                 )
                 continue
 
-            analysis = analyze_research_result(summary, create_field_plot=True)
+            analysis = analyze_research_result(summary, create_field_plot=False)
+            resonance = analysis["summary"].get("resonance_wavelength_um")
+            if resonance is not None and run.index in field_point_indices:
+                point_name = analysis["simulation_name"] or analysis["run_id"]
+                print(
+                    f"Running resonance-field stage for sweep point {run.index + 1} "
+                    f"at {float(resonance) * 1000:.3f} nm"
+                )
+                try:
+                    _, field_report = run_resonance_field_stage(
+                        summary,
+                        analysis,
+                        precision=precision,
+                        cache_enabled=cache_enabled,
+                        run_name=f"{point_name} resonance field",
+                    )
+                    print(
+                        f"Resonance maps for {point_name}: "
+                        f"{Path(field_report['manifest']).parent}"
+                    )
+                except Exception as exc:
+                    warnings.append(
+                        f"{point_name}: resonance-field stage failed: {exc}"
+                    )
+            elif resonance is None and run.index in field_point_indices:
+                warnings.append(
+                    f"Sweep point {run.index + 1} had no detected resonance; field stage skipped."
+                )
             rows = research_rows(analysis)
             writer.writerows(rows)
             row_count += len(rows)
@@ -574,6 +676,22 @@ def parse_args() -> Any:
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
     parser.add_argument("--no-resume", action="store_true")
     parser.add_argument("--stop-on-error", action="store_true")
+    parser.add_argument(
+        "--precision",
+        choices=tuple(PRECISION_MODES),
+        default=DEFAULT_SWEEP_PRECISION,
+    )
+    parser.add_argument(
+        "--field-maps",
+        choices=("selected", "all", "none"),
+        default=FIELD_MAP_MODE,
+        help="Choose which sweep points receive the expensive resonance-field stage.",
+    )
+    parser.add_argument(
+        "--field-points",
+        help="Comma-separated 1-based points or first,middle,last; used with --field-maps selected.",
+    )
+    parser.add_argument("--no-reference-cache", action="store_true")
     return parser.parse_args()
 
 
@@ -584,6 +702,11 @@ def main() -> None:
         raise SystemExit("Sweep name cannot be empty.")
     if args.workers < 1:
         raise SystemExit("--workers must be at least 1.")
+    if args.workers != 1:
+        raise SystemExit(
+            "V5 time estimates and shared reference caching require --workers 1. "
+            "Run independent sweeps in separate terminals if parallel execution is needed."
+        )
 
     sweep_id = args.sweep_id or make_sweep_id(display_name)
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", sweep_id):
@@ -594,30 +717,63 @@ def main() -> None:
     except (KeyError, TypeError, ValueError) as exc:
         raise SystemExit(f"Invalid sweep setup: {exc}") from exc
 
-    base_config = deepcopy(BASE_CONFIG)
+    precision = get_precision_profile(args.precision)
+    cache_enabled = REFERENCE_CACHE_ENABLED and not args.no_reference_cache
+    base_config = apply_broadband_precision(BASE_CONFIG, precision)
     base_config["tags"] = list(
-        dict.fromkeys([*base_config.get("tags", []), f"sweep:{safe_name(display_name)}"])
+        dict.fromkeys(
+            [
+                *base_config.get("tags", []),
+                f"sweep:{safe_name(display_name)}",
+                f"precision:{args.precision}",
+            ]
+        )
     )
     grid_points = math.prod(len(axis["config_values"]) for axis in runtime.values())
     total_runs = grid_points * REPETITIONS
+    selections: Sequence[str | int]
+    if args.field_points:
+        selections = [token.strip() for token in args.field_points.split(",") if token.strip()]
+    else:
+        selections = SELECTED_FIELD_POINTS
+    try:
+        field_point_indices = resolve_field_point_indices(
+            total_runs,
+            args.field_maps,
+            selections,
+        )
+    except ValueError as exc:
+        raise SystemExit(f"Invalid field-map selection: {exc}") from exc
+
     print(f"Starting sweep: {display_name}")
     print(f"Active variables: {', '.join(runtime)}")
-    print(f"Grid points: {grid_points}; total simulations: {total_runs}")
+    print(f"Grid points: {grid_points}; broadband research cases: {total_runs}")
+    print(f"Precision mode: {args.precision}")
+    selected_display = ", ".join(str(index + 1) for index in sorted(field_point_indices))
+    print(f"Field-map sweep points: {selected_display or 'none'}")
+    print(f"Reference cache: {'enabled' if cache_enabled else 'disabled'}")
     print(f"Sweep ID / results name: {sweep_id}")
 
-    result = parameter_sweep(
-        base_config=base_config,
-        parameters=parameters,
-        mode="grid",
-        name=display_name,
-        sweep_id=sweep_id,
-        workers=args.workers,
-        repetitions=REPETITIONS,
-        continue_on_error=not args.stop_on_error,
-        resume=not args.no_resume,
-    )
+    with simulation_runtime_features(cache_enabled):
+        result = parameter_sweep(
+            base_config=base_config,
+            parameters=parameters,
+            mode="grid",
+            name=display_name,
+            sweep_id=sweep_id,
+            workers=args.workers,
+            repetitions=REPETITIONS,
+            continue_on_error=not args.stop_on_error,
+            resume=not args.no_resume,
+        )
 
-    csv_path, row_count, records, warnings = export_research_results(result, runtime)
+        csv_path, row_count, records, warnings = export_research_results(
+            result,
+            runtime,
+            field_point_indices=field_point_indices,
+            precision=precision,
+            cache_enabled=cache_enabled,
+        )
     plot_paths = create_sweep_visualisations(records, runtime, result.output_directory)
 
     print(f"Status: {result.status}")
