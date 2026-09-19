@@ -1,9 +1,9 @@
 """
 Edit ``SIMULATION_CONFIG`` below, then run from the project root:
 
-    python scripts/run_single_v5.py --precision fast
-    python scripts/run_single_v5.py --precision sweep
-    python scripts/run_single_v5.py --precision final
+    python scripts/run_single.py --precision fast
+    python scripts/run_single.py --precision sweep
+    python scripts/run_single.py --precision final
 
 The research CSV contains only the independent and dependent variables chosen
 for this project.  Internal MEEP files remain available for reproducibility,

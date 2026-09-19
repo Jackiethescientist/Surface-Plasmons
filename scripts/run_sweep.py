@@ -5,9 +5,9 @@ the other active variables.  All combinations are simulated (a Cartesian grid).
 
 Examples:
 
-    python scripts/run_sweep_v5.py --precision fast --field-maps none
-    python scripts/run_sweep_v5.py --precision sweep --field-points first,middle,last
-    python scripts/run_sweep_v5.py --precision final --field-points 1,9,17
+    python scripts/run_sweep.py --precision fast --field-maps none
+    python scripts/run_sweep.py --precision sweep --field-points first,middle,last
+    python scripts/run_sweep.py --precision final --field-points 1,9,17
 
 Compatible empty-cell calculations are cached. Estimated wall-time ranges are
 printed before each solver stage and calibrate after the first completed stage.
