@@ -27,6 +27,7 @@ import numpy as np
 
 from .database import SimulationDatabase, find_project_root, new_run_id
 from .geometries import GeometryBuild, build_geometry, get_geometry_spec
+from .particle_line import line_extents
 
 
 class SimulationConfigError(ValueError):
@@ -138,6 +139,10 @@ class OutputConfig:
     field_components: tuple[str, ...] = ("Ez",)
     field_region_center_um: tuple[float, float, float] | None = None
     field_region_size_um: tuple[float, float, float] | None = None
+    field_nfreq: int = 1
+    field_wavelength_range_um: tuple[float, float] | None = None
+    experiment_directory: str | None = None
+    stage_name: str | None = None
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any] | None) -> "OutputConfig":
@@ -151,6 +156,10 @@ class OutputConfig:
         for key in ("field_region_center_um", "field_region_size_um"):
             if data.get(key) is not None:
                 data[key] = _vector3(data[key], key)
+        if data.get("field_wavelength_range_um") is not None:
+            data["field_wavelength_range_um"] = _normalise_band(
+                data["field_wavelength_range_um"]
+            )
         result = cls(**data)
         result.validate()
         return result
@@ -169,6 +178,15 @@ class OutputConfig:
         if self.field_region_size_um is not None:
             if any(value < 0 for value in self.field_region_size_um):
                 raise SimulationConfigError("Field-region sizes cannot be negative.")
+        if isinstance(self.field_nfreq, bool) or not isinstance(self.field_nfreq, Integral) or self.field_nfreq < 1:
+            raise SimulationConfigError("output.field_nfreq must be a positive integer.")
+        if self.field_wavelength_range_um is not None:
+            self.field_wavelength_range_um = _normalise_band(self.field_wavelength_range_um)
+        if self.stage_name is not None:
+            if not self.stage_name.strip() or any(part in {"", ".", ".."} for part in Path(self.stage_name).parts):
+                raise SimulationConfigError("output.stage_name must be a safe relative path.")
+            if Path(self.stage_name).is_absolute():
+                raise SimulationConfigError("output.stage_name must be relative.")
 
 
 @dataclass(slots=True)
@@ -304,6 +322,13 @@ class SimulationConfig:
         self.output.validate()
         if self.source.axis == "z" and self.dimensions == 2:
             raise SimulationConfigError("A 2-D xy simulation cannot propagate along z.")
+        if self.source.kind != "dipole" and self.source.axis is not None:
+            component = self.source.component.strip().lower()
+            if component in {"ex", "ey", "ez"} and component[-1] == self.source.axis:
+                raise SimulationConfigError(
+                    "A plane wave cannot have its electric-field component parallel "
+                    "to its propagation axis. Choose a transverse Ex, Ey, or Ez component."
+                )
         if not isinstance(self.record_database, bool):
             raise SimulationConfigError("record_database must be true or false.")
 
@@ -327,6 +352,7 @@ class SimulationContext:
     dft_fields: Any | None
     dft_components: dict[str, Any]
     field_frequency: float
+    field_frequencies: tuple[float, ...]
     decay_point_um: tuple[float, float, float]
 
 
@@ -378,6 +404,13 @@ def create_simulation(
 
     cell_size = _resolve_cell_size(cfg, built)
     source_axis, source_direction = _resolve_source_direction(cfg, built)
+    if cfg.source.kind != "dipole":
+        component_name = cfg.source.component.strip().lower()
+        if component_name in {"ex", "ey", "ez"} and component_name[-1] == source_axis:
+            raise SimulationConfigError(
+                "A plane wave cannot have its electric-field component parallel "
+                f"to propagation along {source_axis}."
+            )
     periodic_axes = set(built.periodic_axes)
     pml_axes = _resolve_pml_axes(cfg, periodic_axes)
     boundaries = _build_pml(mp, cfg.pml_thickness_um, pml_axes)
@@ -417,16 +450,33 @@ def create_simulation(
     dft_fields = None
     dft_components: dict[str, Any] = {}
     field_frequency = fcen
+    field_frequencies: tuple[float, ...] = (field_frequency,)
     if cfg.output.save_fields or cfg.output.save_images:
         dft_components = {
             name: _component(mp, name) for name in cfg.output.field_components
         }
         region_center, region_size = _field_region(cfg, cell_size, pml_axes)
+        field_band = cfg.output.field_wavelength_range_um or cfg.source.wavelength_range_um
+        field_fcen, field_df, field_nfreq = _frequency_parameters(
+            field_band, cfg.output.field_nfreq
+        )
+        field_frequency = field_fcen
+        if field_nfreq == 1:
+            field_frequencies = (field_fcen,)
+        else:
+            field_frequencies = tuple(
+                float(value)
+                for value in np.linspace(
+                    field_fcen - field_df / 2.0,
+                    field_fcen + field_df / 2.0,
+                    field_nfreq,
+                )
+            )
         dft_fields = simulation.add_dft_fields(
             list(dft_components.values()),
-            field_frequency,
-            0,
-            1,
+            field_fcen,
+            field_df,
+            field_nfreq,
             center=mp.Vector3(*region_center),
             size=mp.Vector3(*region_size),
         )
@@ -450,6 +500,7 @@ def create_simulation(
         dft_fields=dft_fields,
         dft_components=dft_components,
         field_frequency=field_frequency,
+        field_frequencies=field_frequencies,
         decay_point_um=decay_point,
     )
 
@@ -901,18 +952,34 @@ def _save_outputs(
 
     field_arrays: dict[str, np.ndarray] = {}
     if context.dft_fields is not None:
+        frequency_path = paths["arrays"] / "field_frequencies.npy"
+        np.save(frequency_path, np.asarray(context.field_frequencies, dtype=float))
+        artifacts["field_frequencies"] = str(frequency_path)
         for name, component in context.dft_components.items():
-            array = np.asarray(
-                simulation.get_dft_array(context.dft_fields, component, 0)
-            )
+            arrays = [
+                np.asarray(simulation.get_dft_array(context.dft_fields, component, index))
+                for index in range(len(context.field_frequencies))
+            ]
+            array = arrays[len(arrays) // 2]
             field_arrays[name] = array
-            finite_field = np.abs(array[np.isfinite(array)])
+            stacked = np.stack(arrays, axis=0)
+            finite_field = np.abs(stacked[np.isfinite(stacked)])
             if finite_field.size:
                 metrics[f"{name}_abs_max"] = float(np.max(finite_field))
             if cfg.output.save_fields:
-                field_path = paths["arrays"] / f"field_{name}.npy"
-                np.save(field_path, array)
-                artifacts[f"field_{name}_array"] = str(field_path)
+                if len(arrays) == 1:
+                    field_path = paths["arrays"] / f"field_{name}.npy"
+                    np.save(field_path, array)
+                    artifacts[f"field_{name}_array"] = str(field_path)
+                else:
+                    field_path = paths["arrays"] / f"field_{name}_spectrum.npz"
+                    np.savez_compressed(
+                        field_path,
+                        values=stacked,
+                        frequencies=np.asarray(context.field_frequencies, dtype=float),
+                        wavelengths_um=1.0 / np.asarray(context.field_frequencies, dtype=float),
+                    )
+                    artifacts[f"field_{name}_spectrum"] = str(field_path)
 
         if cfg.output.save_fields:
             try:
@@ -1068,6 +1135,8 @@ def _estimate_geometry_extent(
         if p["shape"] == "cube":
             return (p["size"], p["size"], p["height"])
         return (2 * p["radius"], 2 * p["radius"], p["height"])
+    if name == "particle_line_on_substrate":
+        return line_extents(p)
     if name == "mim_waveguide":
         return (span, p["gap"] + 2 * p["metal_thickness"], span)
     if name == "nanoparticle_on_mirror":
@@ -1166,6 +1235,16 @@ def _import_meep() -> Any:
 
 
 def _output_paths(cfg: SimulationConfig, run_id: str) -> dict[str, Path]:
+    if cfg.output.experiment_directory:
+        root = Path(cfg.output.experiment_directory).expanduser().resolve()
+        stage = cfg.output.stage_name or run_id
+        run = root / "stages" / stage
+        return {
+            "root": root,
+            "run": run,
+            "arrays": run / "arrays",
+            "images": run / "figures",
+        }
     root = (
         Path(cfg.output.results_root).expanduser().resolve()
         if cfg.output.results_root

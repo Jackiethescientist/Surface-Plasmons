@@ -26,7 +26,10 @@ def main() -> None:
 
     output = Path("data/results/images/meep_test.png")
     output.parent.mkdir(parents=True, exist_ok=True)
-    simulation.plot2D()
+    axis = simulation.plot2D()
+    axis.set_xlabel("x position (µm)")
+    axis.set_ylabel("y position (µm)")
+    axis.set_title("MEEP installation test geometry")
     plt.savefig(output, dpi=200, bbox_inches="tight")
     plt.close()
     print(f"Saved: {output.resolve()}")

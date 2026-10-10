@@ -1,0 +1,25 @@
+{
+  "simulation_name": "perfect_cube_line_n9_spacing160nm",
+  "precision": "fast",
+  "geometry": {
+    "particle_shape": "cube",
+    "particle_count": 9,
+    "particle_material": "au",
+    "background_material": "air",
+    "substrate_material": "sio2",
+    "cube_size_um": 0.080,
+    "spacing_um": 0.160,
+    "substrate_thickness_um": 0.300,
+    "defects": []
+  },
+  "source": {
+    "wavelength_range_nm": [450.0, 800.0],
+    "propagation_axis": "y",
+    "propagation_direction": -1,
+    "polarisation": "Ex"
+  },
+  "measurement": {
+    "field_map_frequencies": "auto",
+    "maximum_auto_field_maps": 1
+  }
+}

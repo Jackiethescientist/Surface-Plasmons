@@ -19,6 +19,8 @@ from typing import Any, Iterable, Sequence
 import difflib
 import re
 
+import numpy as np
+
 
 MEEP_MATERIALS_URL = "https://meep.readthedocs.io/en/latest/Materials/"
 MEEP_MATERIALS_SOURCE_URL = (
@@ -683,6 +685,43 @@ def validate_material_band(
     return problems
 
 
+def dielectric_function(
+    name: str,
+    frequencies: Sequence[float],
+    *,
+    allow_out_of_range: bool = False,
+    allow_unstable: bool = False,
+) -> list[complex]:
+    """Evaluate the mean diagonal relative permittivity at MEEP frequencies.
+
+    MEEP frequency is inverse micrometres.  For isotropic materials all three
+    diagonal entries are identical.  The diagonal mean gives a documented
+    scalar representation for CSV export while preserving complex dispersion.
+    """
+
+    values = [float(value) for value in frequencies]
+    if not values or any(value <= 0 for value in values):
+        raise MaterialError("frequencies must contain positive values.")
+    wavelengths = [1.0 / value for value in values]
+    medium = build_material(
+        name,
+        wavelength_um=(min(wavelengths), max(wavelengths)),
+        allow_out_of_range=allow_out_of_range,
+        allow_unstable=allow_unstable,
+    )
+    result: list[complex] = []
+    for frequency in values:
+        tensor = np.asarray(medium.epsilon(frequency), dtype=complex)
+        if tensor.ndim == 0:
+            result.append(complex(tensor))
+        elif tensor.shape[-2:] == (3, 3):
+            result.append(complex(np.trace(tensor) / 3.0))
+        else:
+            flat = tensor.reshape(-1)
+            result.append(complex(np.mean(flat)))
+    return result
+
+
 def _normalise_wavelengths(
     wavelengths_um: float | Sequence[float],
 ) -> tuple[float, ...]:
@@ -714,6 +753,7 @@ __all__ = [
     "MaterialSpec",
     "MaterialUnavailableError",
     "build_material",
+    "dielectric_function",
     "get_material_spec",
     "list_backend_material_names",
     "list_materials",

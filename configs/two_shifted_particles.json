@@ -1,0 +1,34 @@
+{
+  "simulation_name": "two_defects_n9_particles3_5",
+  "precision": "fast",
+  "geometry": {
+    "particle_shape": "sphere",
+    "particle_count": 9,
+    "particle_material": "au",
+    "background_material": "air",
+    "substrate_material": "sio2",
+    "particle_radius_um": 0.040,
+    "spacing_um": 0.150,
+    "substrate_thickness_um": 0.300,
+    "defects": [
+      {
+        "particle_index": 3,
+        "shift_um": [-0.015, 0.0, 0.0]
+      },
+      {
+        "particle_index": 5,
+        "shift_um": [0.015, 0.0, 0.0]
+      }
+    ]
+  },
+  "source": {
+    "wavelength_range_nm": [450.0, 800.0],
+    "propagation_axis": "y",
+    "propagation_direction": -1,
+    "polarisation": "Ex"
+  },
+  "measurement": {
+    "field_map_frequencies": "auto",
+    "maximum_auto_field_maps": 1
+  }
+}

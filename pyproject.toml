@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "surface-plasmon-model"
-version = "0.2.0"
-description = "Simulation, persistence, analysis, parameter sweeps, and visualization for surface-plasmon systems."
+version = "0.3.1"
+description = "3-D finite particle-line simulations, defect studies, validation, and field analysis with MEEP."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"

@@ -1,241 +1,290 @@
-# Surface Plasmon Model
+# Surface Plasmons — Finite Particle-Line Project
 
-Surface Plasmon Model is a Python toolkit for building, running, recording, analysing, sweeping, and visualising surface-plasmon simulations with MEEP.
+This version is focused on one research question:
 
-Version 0.2.0 expands the project from basic analytical helpers into a complete simulation workflow:
+> How do positional defects in a finite line of plasmonic particles change the
+> frequency-dependent electric-field distribution, and when does an
+> equal-spacing coupled-particle model stop describing the system accurately?
 
-- 65 material definitions with aliases, metadata, and wavelength validation
-- 25 reusable plasmonic geometries
-- MEEP simulation configuration and execution
-- SQLite-backed run metadata, spectra, metrics, artifacts, and events
-- resumable serial or process-based parameter sweeps
-- spectral, field, energy-balance, and analytical SPP calculations
-- publication-ready spectrum, field, sweep, heatmap, and summary plots
+The simulations are genuinely three-dimensional. A finite line lies along
+`x`, the substrate surface normal is `y`, and `z` is the transverse in-plane
+direction. A normal-incidence source normally propagates along `-y`; `Ex`
+polarisation is parallel to the line and `Ez` is perpendicular to the line.
 
-All lengths and wavelengths passed to the Python API use micrometres. For example, 40 nm is written as 0.040.
+All lengths supplied to the Python package use micrometres. JSON example files
+use nanometres only where the field name explicitly ends in `_nm`.
+
+## What is included
+
+- A finite line of spheres or cubes on a dielectric substrate.
+- Explicit one- or two-particle position defects.
+- Broadband complex `Ex`, `Ey`, `Ez`, field-amplitude enhancement and field-intensity enhancement versus position and frequency.
+- Complex dielectric function versus frequency for particle, substrate and background.
+- Optional narrowband full-volume maps on the `xy`, `xz` and `yz` planes.
+- Substrate-only reference calculations with compatible-result caching.
+- One named result folder per physical simulation.
+- A separate validation runner for a user-selected simulation.
+- Numerical resolution/domain checks and a same-scale Equation-2 coupled-dipole comparison.
+- `fast`, `study` and `final` precision modes (`sweep` remains a legacy alias for `study`).
+- Runtime and memory estimates before each expensive stage.
 
 ## Installation
 
-### Full simulation environment
+PyMEEP is supplied through conda-forge. On Windows, use these commands inside WSL2:
 
-PyMEEP is distributed through conda-forge, so this is the recommended setup for simulations. On Windows, run these commands inside WSL2.
-
-~~~bash
-git clone https://github.com/Jackiethescientist/Surface__Plasmons.git
-cd Surface__Plasmons
-
+```bash
 conda env create -f environment.yml
 conda activate plasmon
 python -m pip install -e ".[dev]"
-~~~
-
-Verify the package and MEEP:
-
-~~~bash
-python -c "import surface_plasmons as sp; print(sp.__version__)"
 python scripts/test_meep.py
-~~~
+```
 
-The MEEP check writes data/results/images/meep_test.png.
+The ordinary unit tests do not start MEEP:
 
-### Analysis-only installation
+```bash
+pytest
+```
 
-The numerical analysis, database, sweep construction, and plotting modules do not import MEEP at package-import time:
+## First safe test
 
-~~~bash
-python -m pip install surface-plasmon-model
-~~~
+Validate the configuration and print a runtime estimate without starting MEEP:
 
-A conda environment containing PyMEEP is still required when run_simulation or run_sweep actually executes a simulation.
+```bash
+python scripts/run_single.py \
+  --config configs/perfect_line.json \
+  --precision fast \
+  --field-maps none \
+  --dry-run
+```
 
-## Quick start
+Then run the broadband simulation without the expensive 3-D narrowband map:
 
-Run a two-dimensional gold-sphere simulation:
+```bash
+python scripts/run_single.py \
+  --config configs/perfect_line.json \
+  --precision fast \
+  --field-maps none
+```
 
-~~~python
-from surface_plasmons import run_simulation
+Once that completes correctly, request one automatically selected field map:
 
-result = run_simulation(
-    {
-        "geometry_name": "nanoparticle_sphere",
-        "geometry_parameters": {
-            "particle": "au",
-            "background": "air",
-            "radius": 0.040,
-        },
-        "dimensions": 2,
-        "resolution": 80,
-        "source": {
-            "wavelength_range_um": [0.45, 0.80],
-            "component": "Ez",
-        },
-        "flux": {
-            "nfreq": 101,
-            "normalization": "empty_cell",
-        },
-    }
-)
+```bash
+python scripts/run_single.py \
+  --config configs/perfect_line.json \
+  --name perfect_line_n9_spacing150nm_with_map \
+  --precision fast \
+  --field-maps auto
+```
 
-print(result.run_id)
-print(result.status)
-print(result.output_directory)
-~~~
+Use a new name because completed results are never silently overwritten.
 
-The same example is available as:
+## Example configurations
 
-~~~bash
-python scripts/run_single.py
-~~~
+| File | Purpose |
+| --- | --- |
+| `configs/equation2_perfect_line_homogeneous.json` | Controlled homogeneous-background benchmark for Equation 2 |
+| `configs/perfect_line.json` | Equal-spacing nine-sphere validation case |
+| `configs/one_shifted_particle.json` | Central sphere shifted 20 nm along the line |
+| `configs/two_shifted_particles.json` | Two symmetrically shifted spheres |
+| `configs/cube_line.json` | Equal-spacing line of cubes |
 
-Run modules through the installed package or through the scripts directory. Do not execute files inside src/surface_plasmons directly; those files use package-relative imports.
+The important defect format is:
 
-## Materials and geometries
+```json
+"defects": [
+  {
+    "particle_index": 4,
+    "shift_um": [0.020, 0.0, 0.0]
+  }
+]
+```
 
-Inspect the available registries without starting MEEP:
+Particle indices start at zero. `shift_um` gives `[x, y, z]` displacement.
+The configuration is rejected before MEEP starts if particles overlap or enter
+the substrate.
 
-~~~python
-from surface_plasmons import list_geometries, list_materials
+## Broadband and narrowband stages
 
-for material in list_materials():
-    print(material.key, material.category, material.valid_wavelength_um)
+The broadband stage is the main research measurement. It stores an external
+line monitor above the particle surfaces at many frequencies. The default
+offset is 20 nm above the highest particle surface, so the samples are fields
+in the surrounding medium rather than fields inside gold. This makes the
+position-frequency maps both physically comparable to a point-dipole model and
+manageable in memory and storage.
 
-for geometry in list_geometries():
-    print(geometry.key, geometry.category, geometry.dimensions)
-~~~
+The narrowband stage is optional. It reruns only selected wavelengths and stores
+full three-dimensional vector fields. Available choices are:
 
-Use material_catalog() and geometry_catalog() when a JSON-ready mapping is more convenient.
+```bash
+--field-maps none
+--field-maps auto
+--field-maps 620,670
+```
 
-## Parameter sweeps
+Saving full 3-D fields at every broadband frequency is intentionally avoided.
 
-A stable sweep_id allows an interrupted sweep to resume and lets completed configurations be reused from the database:
+## Result folders
 
-~~~python
-from surface_plasmons import parameter_sweep
+A simulation named `one_defect_n9_particle4_dx20nm` produces one top-level folder:
 
-sweep = parameter_sweep(
-    base_config={
-        "geometry_name": "nanoparticle_sphere",
-        "geometry_parameters": {
-            "particle": "au",
-            "background": "air",
-        },
-        "dimensions": 2,
-        "resolution": 80,
-        "source": {"wavelength_range_um": [0.45, 0.80]},
-        "flux": {"nfreq": 101, "normalization": "empty_cell"},
-    },
-    parameters={
-        "geometry_parameters.radius": [0.030, 0.040, 0.050],
-    },
-    name="gold_sphere_radius",
-    sweep_id="gold_sphere_radius",
-    workers=1,
-    resume=True,
-)
+```text
+data/results/one_defect_n9_particle4_dx20nm/
+├── config_input.json
+├── config_resolved.json
+├── manifest.json
+├── status.json
+├── run.log
+├── geometry/
+│   ├── particle_positions.csv
+│   └── geometry_xy.png
+├── frequency_scan/
+│   ├── dielectric_function_vs_frequency.csv
+│   ├── field_strength_vs_position_and_frequency.csv
+│   ├── field_response_summary.csv
+│   ├── selected_frequencies.csv
+│   ├── field_position_frequency_heatmap.png (amplitude, |E|/|E_reference|)
+│   ├── field_intensity_position_frequency_heatmap.png (squared intensity ratio)
+│   └── particle_field_spectra.png
+├── field_maps/
+│   └── <wavelength>nm/
+│       ├── field_Ex.npy
+│       ├── field_Ey.npy
+│       ├── field_Ez.npy
+│       ├── field_amplitude_enhancement.npy
+│       ├── field_intensity_enhancement.npy
+│       ├── field_total_enhancement.npy (legacy intensity alias)
+│       ├── coordinates.npz
+│       ├── field_components_xy.png
+│       ├── field_components_xz.png
+│       ├── field_components_yz.png
+│       ├── field_amplitude_xy.png
+│       ├── field_amplitude_xz.png
+│       ├── field_amplitude_yz.png
+│       └── field_map_manifest.json
+├── summary/
+│   ├── research_results.csv
+│   └── field_map_reports.json
+├── stages/
+│   └── labelled raw MEEP stages
+└── validation/
+    └── separately named validation attempts
+```
 
-print(sweep.status)
-print(sweep.manifest_path)
-~~~
+CSV files use UTF-8 with a byte-order mark so they import cleanly into Excel.
+The shared `data/reference_cache_v7` and `data/simulations.db` are internal
+indexes/caches, not research-result folders.
 
-Use workers=1 first. MEEP simulations can use substantial memory; increase process workers only after measuring one run.
+## Electric-field scales
 
-The complete sweep, analysis, and plotting workflow is:
+The broadband complex vector is divided by one complex reference amplitude for
+each frequency. That reference is the robust spatial value of the driven
+component (`Ex` by default) from the particle-free run. A single scale preserves
+the spatial profile and avoids divisions by isolated near-zero reference pixels.
 
-~~~bash
-python scripts/run_sweep.py
-~~~
+The total field amplitude and intensity are calculated using all three complex
+components:
 
-## Analysis and visualisation
+```text
+F_E(r,f) = sqrt(|Ex/Eref|² + |Ey/Eref|² + |Ez/Eref|²)
+F_I(r,f) = F_E(r,f)²
+```
 
-Analyse synthetic or saved spectra:
+Every plot title and colour bar states which scale it displays. The legacy
+`total_field_enhancement` output is retained for compatibility and means
+intensity enhancement, `F_I`. Full-volume maps retain pointwise particle-free
+intensity normalization because they compare matching spatial grids. The
+reference keeps the substrate and removes only the particles; compatible
+references are reused across configurations.
 
-~~~python
-import numpy as np
-from surface_plasmons import analyze_spectrum, plot_spectrum
+## Validation
 
-wavelengths = np.linspace(0.45, 0.80, 401)
-response = np.exp(-0.5 * ((wavelengths - 0.620) / 0.025) ** 2)
+Validation never runs automatically for every result. Select one simulation:
 
-report = analyze_spectrum(
-    wavelengths,
-    response,
-    monitor_name="extinction",
-    prominence=0.05,
-)
+```bash
+python scripts/run_validation.py \
+  --simulation perfect_line_n9_spacing150nm \
+  --name quick_validation_v1
+```
 
-print(report.primary_peak)
-plot_spectrum(
-    wavelengths,
-    response,
-    label="Extinction",
-    mark_peak=True,
-    save_path="data/results/images/example_spectrum.png",
-)
-~~~
+The default `configuration,theory` checks read existing data and are fast. Runs
+created before version 0.3.1 must be rerun because their CSV files do not contain
+the normalized complex vector field required for a same-scale comparison.
+Resolution and domain convergence start additional MEEP calculations:
 
-For saved simulations, use analyze_run(run_id), export_analysis(...), plot_run_spectra(...), or create_run_summary_figure(...). SweepResult objects and saved sweep.json manifests can be passed to plot_sweep_1d and plot_sweep_heatmap.
+```bash
+python scripts/run_validation.py \
+  --simulation perfect_line_n9_spacing150nm \
+  --name final_validation_v1 \
+  --checks configuration,theory,resolution,domain,time
+```
 
-## Database
+Custom numerical values can be supplied:
 
-SimulationDatabase creates data/simulations.db automatically unless a different path is supplied:
+```bash
+--resolutions 60,80,100
+--paddings 0.30,0.40
+```
 
-~~~python
-from surface_plasmons import SimulationDatabase
+Validation results remain inside the selected simulation's `validation` folder.
+Use a new validation name for every attempt.
 
-database = SimulationDatabase()
-completed = database.list_runs(status="completed", limit=10)
+## Theory scope
 
-for run in completed:
-    print(run["run_id"], run["geometry_name"], run["output_directory"])
-~~~
+`surface_plasmons.theory` implements the paper's complex vector equation
 
-Set the SURFACE_PLASMONS_DB environment variable to override the default database path.
+```text
+E_loc,i = E0 exp(i k.r_i) - sum_(j != i) A_ij.P_j,
+P_i = alpha_i E_loc,i.
+```
 
-## Output layout
+For the quasistatic Green tensor `G`, the code defines `A_ij = -G_ij`; therefore
+the paper's `-A_ij.P_j` is the physical dipole field `+G_ij.P_j`. The solver
+includes the incident phase and all Cartesian dipole components. Validation
+evaluates the solved dipoles at the exact external MEEP sample points, compares
+the complex fields on one common scale, and reports the Equation-2 residual.
 
-Generated data is intentionally ignored by Git:
+Start with the optically homogeneous
+`configs/equation2_perfect_line_homogeneous.json` case. For configurations with
+a substrate, validation adds a simple electrostatic image-dipole correction and
+labels it as an approximation rather than claiming that it is the exact
+homogeneous-medium Equation 2.
 
-~~~text
-data/
-├── simulations.db
-└── results/
-    ├── analysis/
-    ├── images/
-    ├── runs/
-    └── sweeps/
-~~~
+This baseline is deliberately limited: it does not contain the full retarded
+substrate dyadic Green tensor or higher multipoles. Those limitations are part
+of the research question rather than being hidden.
 
-Each simulation can save its resolved configuration, summary, spectra, epsilon array, field arrays, and figures. Sweep directories contain a continuously updated sweep.json manifest and runs.csv table.
+## Generic sweeps
+
+The old generic sweep functionality is preserved for compatibility in
+`scripts/run_sweep.py` and `surface_plasmons.sweep`, but it is not part of the
+recommended defect-line workflow. Frequency sampling inside one broadband run
+is still essential and is not the same as a parameter sweep.
+
+## Interruption and naming
+
+- A new run refuses to use an existing result name.
+- Add a suffix such as `_v2` for a new configuration.
+- `--resume` is accepted only when the configuration hash matches an existing
+  interrupted folder.
+- `Ctrl+C` records an `interrupted` status instead of pretending the run completed.
+- Internal reference-cache files may be recalculated; research result folders
+  are never silently replaced.
 
 ## Package map
 
 | Module | Purpose |
 | --- | --- |
-| materials | Material registry, aliases, model construction, wavelength checks |
-| geometries | Geometry registry, validation, and MEEP object construction |
-| simulation | Typed configuration, validation, execution, normalization, and output |
-| database | SQLite run, metric, spectrum, artifact, and event persistence |
-| sweep | Grid/zip expansion, resumable execution, and JSON/CSV manifests |
-| analysis | Peak/FWHM/Q analysis, fields, energy balance, and SPP formulas |
-| visualization | Spectra, fields, sweeps, heatmaps, dispersion, and run summaries |
-
-## Development and release
-
-Install development dependencies and run the test suite:
-
-~~~bash
-python -m pip install -e ".[dev]"
-pytest
-python -m build
-python -m twine check dist/*
-~~~
-
-The standard tests do not require MEEP. scripts/test_meep.py is the separate environment smoke test.
-
-Releases use semantic versioning. After a release pull request is merged, publish a GitHub release whose tag exactly matches the package version, such as v0.2.0. The release workflow verifies the tag, tests the project, builds both distributions, checks them with Twine, and publishes through PyPI trusted publishing.
-
-See CHANGELOG.md for release notes.
+| `particle_line` | Validated ideal and defect particle positions |
+| `geometries` | MEEP geometry registry including the finite line and substrate |
+| `project` | JSON schema, precision modes, monitor regions and estimates |
+| `simulation` | MEEP construction, execution and multi-frequency vector fields |
+| `workflow` | Broadband/reference/narrowband orchestration and labelled outputs |
+| `results` | Safe one-folder storage, manifests and status |
+| `theory` | Coupled-dipole baseline and profile comparison |
+| `validation` | Selected-simulation theory and convergence checks |
+| `materials` | Material registry and complex dielectric-function evaluation |
+| `database` | Internal run-stage metadata and artifacts |
 
 ## License
 
-MIT License. See LICENSE.
+MIT. See `LICENSE`.

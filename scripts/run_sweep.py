@@ -32,7 +32,7 @@ import numpy as np
 from surface_plasmons.sweep import SweepResult, parameter_sweep
 
 # Both files belong in the same scripts/ folder.
-from run_single import (
+from run_general_single import (
     PRECISION_MODES,
     REFERENCE_CACHE_ENABLED,
     RESEARCH_CSV_COLUMNS,
@@ -205,7 +205,7 @@ DEFAULT_WORKERS = 1  # MEEP is memory intensive; start with one worker.
 PLOT_RESULTS = {
     "resonance_wavelength_um": "Resonance wavelength (µm)",
     "peak_spectral_response": "Peak spectral response",
-    "electric_field_enhancement": "Electric-field enhancement",
+    "electric_field_enhancement": "Electric-field intensity enhancement, |E|² / |E₀|²",
     "resonance_linewidth_fwhm_um": "Resonance linewidth / FWHM (µm)",
     "quality_factor": "Quality factor Q",
     "peak_absorption": "Peak absorption",

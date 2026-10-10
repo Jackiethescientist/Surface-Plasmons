@@ -31,4 +31,6 @@ Thumbs.db
 # Generated simulation data
 data/results/
 data/simulations.db*
+data/reference_cache*/
+*.lock
 *.h5

@@ -20,6 +20,11 @@ import difflib
 import re
 
 from .materials import MaterialError, build_material, get_material_spec
+from .particle_line import (
+    ParticleLineError,
+    particle_line_positions,
+    validate_defects,
+)
 
 
 class GeometryError(ValueError):
@@ -389,6 +394,30 @@ GEOMETRIES: dict[str, GeometrySpec] = {
         ),
         aliases=("nanoparticle_array", "array"), periodic_axes=("x", "z"),
     ),
+    "particle_line_on_substrate": GeometrySpec(
+        "particle_line_on_substrate",
+        "Finite particle line on a substrate",
+        "finite_array",
+        "A finite 1-D line of spheres or cubes with explicitly positioned defects.",
+        (3,),
+        (
+            P("particle", "material", "Particle material.", "au"),
+            MAT_BACKGROUND,
+            P("substrate", "material", "Substrate material.", "sio2"),
+            P("particle_shape", "choice", "Particle shape.", "sphere", choices=("sphere", "cube")),
+            P("particle_count", "integer", "Number of particles in the line.", 9, minimum=1),
+            P("radius", "positive", "Sphere radius.", 0.040),
+            P("cube_size", "positive", "Cube side length.", 0.080),
+            P("spacing", "positive", "Ideal centre-to-centre spacing.", 0.150),
+            P("substrate_thickness", "positive", "Represented substrate depth.", 0.300),
+            P("surface_y", "number", "y coordinate of the substrate surface.", 0.0),
+            P("particle_surface_gap", "nonnegative", "Gap between particles and substrate.", 0.0),
+            P("defects", "defects", "Particle-indexed displacement records.", ()),
+            P("include_particles", "bool", "False produces the substrate-only reference.", True),
+        ),
+        aliases=("particle_line", "finite_particle_line", "defect_line"),
+        notes="The line is centred along x; y is the surface normal and z is transverse.",
+    ),
     "nanohole_array": GeometrySpec(
         "nanohole_array", "Periodic nanohole array unit cell", "periodic",
         "One circular hole in a metal film for periodic repetition.", (2, 3),
@@ -603,7 +632,7 @@ def get_geometry(
 
 def _validate_value(spec: ParameterSpec, value: Any) -> None:
     kind = spec.kind
-    if kind in {"positive", "nonnegative"}:
+    if kind in {"positive", "nonnegative", "number"}:
         if isinstance(value, bool) or not isinstance(value, Real):
             raise GeometryError(f"{spec.name} must be a number; received {value!r}.")
         number = float(value)
@@ -653,6 +682,12 @@ def _validate_value(spec: ParameterSpec, value: Any) -> None:
     elif kind == "layers":
         _validate_layers(value)
         return
+    elif kind == "defects":
+        try:
+            validate_defects(value)
+        except ParticleLineError as exc:
+            raise GeometryError(str(exc)) from exc
+        return
     else:
         raise GeometryError(f"Internal error: unsupported parameter kind {kind!r}.")
 
@@ -694,6 +729,11 @@ def _cross_validate(name: str, p: Mapping[str, Any]) -> None:
         raise GeometryError("groove_depth cannot exceed metal_depth.")
     if name == "tip_substrate" and p["apex_radius"] > p["tip_radius"]:
         raise GeometryError("apex_radius cannot exceed tip_radius.")
+    if name == "particle_line_on_substrate":
+        try:
+            particle_line_positions(p)
+        except ParticleLineError as exc:
+            raise GeometryError(str(exc)) from exc
 
 
 def _medium(p: Mapping[str, Any], field: str) -> Any:
@@ -1034,6 +1074,40 @@ def _particle_array(mp: Any, p: Mapping[str, Any]):
     }
 
 
+def _particle_line_on_substrate(mp: Any, p: Mapping[str, Any]):
+    positions = particle_line_positions(p)
+    substrate = mp.Block(
+        center=mp.Vector3(
+            float(p["center"][0]),
+            float(p["surface_y"]) - float(p["substrate_thickness"]) / 2.0,
+            float(p["center"][2]),
+        ),
+        size=mp.Vector3(mp.inf, float(p["substrate_thickness"]), mp.inf),
+        material=_medium(p, "substrate"),
+    )
+    objects = [substrate]
+    if p["include_particles"]:
+        particle_material = _medium(p, "particle")
+        for item in positions:
+            centre = mp.Vector3(item.actual_x_um, item.actual_y_um, item.actual_z_um)
+            if p["particle_shape"] == "sphere":
+                objects.append(
+                    mp.Sphere(center=centre, radius=float(p["radius"]), material=particle_material)
+                )
+            else:
+                size = float(p["cube_size"])
+                objects.append(
+                    mp.Block(center=centre, size=mp.Vector3(size, size, size), material=particle_material)
+                )
+    return objects, _medium(p, "background"), {
+        "line_axis": "x",
+        "surface_normal": "y",
+        "surface_y_um": float(p["surface_y"]),
+        "particle_positions": [item.to_dict() for item in positions],
+        "reference_kind": "substrate_only" if not p["include_particles"] else "particle_line",
+    }
+
+
 def _nanohole_array(mp: Any, p: Mapping[str, Any]):
     objects, default, hints = _nanohole(mp, p)
     axes = ("x",) if p["dimensions"] == 2 else ("x", "z")
@@ -1142,6 +1216,7 @@ _BUILDERS: dict[str, Builder] = {
     "ridge_grating": _ridge_grating,
     "groove_grating": _groove_grating,
     "particle_array": _particle_array,
+    "particle_line_on_substrate": _particle_line_on_substrate,
     "nanohole_array": _nanohole_array,
     "mim_waveguide": _mim,
     "nanoparticle_on_mirror": _npom,

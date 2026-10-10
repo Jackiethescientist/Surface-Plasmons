@@ -1,0 +1,27 @@
+{
+  "simulation_name": "equation2_perfect_line_n9_homogeneous",
+  "precision": "fast",
+  "geometry": {
+    "particle_shape": "sphere",
+    "particle_count": 9,
+    "particle_material": "au",
+    "background_material": "air",
+    "substrate_material": "air",
+    "particle_radius_um": 0.040,
+    "spacing_um": 0.150,
+    "substrate_thickness_um": 0.300,
+    "defects": []
+  },
+  "source": {
+    "wavelength_range_nm": [450.0, 800.0],
+    "propagation_axis": "y",
+    "propagation_direction": -1,
+    "polarisation": "Ex"
+  },
+  "measurement": {
+    "probe_offset_from_particle_surface_um": 0.020,
+    "normalization_mode": "global_complex_reference",
+    "field_map_frequencies": "none",
+    "maximum_auto_field_maps": 1
+  }
+}

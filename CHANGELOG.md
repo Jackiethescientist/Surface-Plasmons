@@ -4,6 +4,46 @@ All notable changes to this project are documented here. The project follows Sem
 
 ## Unreleased
 
+## 0.3.1 - 2026-10-09
+
+### Added
+
+- A homogeneous-background nine-sphere configuration for the first controlled Equation-2 comparison.
+- Same-scale complex-field, amplitude, and intensity comparison outputs for coupled-dipole validation.
+- An amplitude-enhancement main heatmap and explicit intensity diagnostic heatmap.
+
+### Changed
+
+- The coupled-dipole baseline now solves the full complex vector form
+  `E_loc,i = E0 exp(i k.r_i) - sum_(j != i) A_ij.P_j`, including incident phase.
+- Broadband measurements are sampled on an external line above the particles and use one complex reference scale per frequency.
+- Every generated plot labels its coordinate axes and states whether its colour/value scale is field amplitude or intensity.
+- The canonical `field_position_frequency_heatmap.png` now displays `|E|/|E_reference|`; the squared ratio is saved separately as `field_intensity_position_frequency_heatmap.png`.
+
+### Fixed
+
+- Removed independent maximum normalization from Equation-2 validation, which previously hid absolute scale disagreement.
+- Made the sign convention explicit: `A_ij = -G_ij` for the quasistatic Green tensor used by the implementation.
+- Prevented near-zero pointwise reference samples from creating artificial broadband enhancement spikes.
+
+## 0.3.0 - 2026-09-26
+
+### Added
+
+- Finite 3-D sphere/cube lines on dielectric substrates with indexed positional defects.
+- Broadband Ex/Ey/Ez line monitors and position-frequency enhancement tables.
+- Optional selected-frequency full-volume field maps on xy, xz, and yz planes.
+- Substrate-only reference caching, one-folder experiment storage, and runtime estimates.
+- A separate selected-simulation validation runner with theory, resolution, domain, and time checks.
+- Coupled-dipole equal-spacing and defect-aware comparison helpers.
+- Perfect-line, one-defect, two-defect, and cube-line JSON examples.
+
+### Changed
+
+- The main `run_single.py` is now the focused particle-line project runner.
+- The earlier general runner is retained as `run_general_single.py` for the optional legacy sweep script.
+- Version increased to 0.3.0.
+
 ## 0.2.0 - 2026-09-14
 
 ### Added
