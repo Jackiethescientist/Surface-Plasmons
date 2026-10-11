@@ -36,7 +36,13 @@ class ParticlePosition:
 
 
 def validate_defects(value: Any, particle_count: int | None = None) -> tuple[dict[str, Any], ...]:
-    """Validate ``[{particle_index, shift_um}, ...]`` and return normalised rows."""
+    """Validate displaced or missing-particle defects.
+
+    A displacement uses ``{"particle_index": i, "shift_um": [dx, dy, dz]}``.
+    A vacancy uses ``{"particle_index": i, "missing": true}``.  The two
+    forms are deliberately mutually exclusive so a configuration cannot hide
+    an unused displacement on a particle that is not present.
+    """
 
     if value is None:
         return ()
@@ -47,11 +53,12 @@ def validate_defects(value: Any, particle_count: int | None = None) -> tuple[dic
     for row, item in enumerate(value):
         if not isinstance(item, Mapping):
             raise ParticleLineError(f"Defect {row} must be a mapping.")
-        unknown = set(item) - {"particle_index", "shift_um"}
+        unknown = set(item) - {"particle_index", "shift_um", "missing"}
         if unknown:
             raise ParticleLineError(f"Defect {row} has unknown field(s): {sorted(unknown)}.")
         index = item.get("particle_index")
-        shift = item.get("shift_um")
+        has_shift = "shift_um" in item
+        missing = item.get("missing", False)
         if isinstance(index, bool) or not isinstance(index, Integral):
             raise ParticleLineError(f"Defect {row} particle_index must be an integer.")
         index = int(index)
@@ -60,6 +67,21 @@ def validate_defects(value: Any, particle_count: int | None = None) -> tuple[dic
             raise ParticleLineError(f"Defect {row} particle_index must be{limit}.")
         if index in seen:
             raise ParticleLineError(f"Particle {index} appears in more than one defect entry.")
+        if not isinstance(missing, bool):
+            raise ParticleLineError(f"Defect {row} missing must be true or false.")
+        if missing and has_shift:
+            raise ParticleLineError(
+                f"Defect {row} cannot contain both missing=true and shift_um."
+            )
+        if missing:
+            seen.add(index)
+            normalised.append({"particle_index": index, "missing": True})
+            continue
+        if not has_shift:
+            raise ParticleLineError(
+                f"Defect {row} requires shift_um or missing=true."
+            )
+        shift = item["shift_um"]
         if (
             not isinstance(shift, Sequence)
             or isinstance(shift, (str, bytes))
@@ -72,6 +94,7 @@ def validate_defects(value: Any, particle_count: int | None = None) -> tuple[dic
             {
                 "particle_index": index,
                 "shift_um": tuple(float(component) for component in shift),
+                "missing": False,
             }
         )
     return tuple(normalised)
@@ -116,13 +139,24 @@ def particle_line_positions(parameters: Mapping[str, Any]) -> tuple[ParticlePosi
     half_height = diameter / 2.0
     particle_y = surface_y + gap + half_height
     first_x = center_x - 0.5 * (count - 1) * spacing
+    defects = validate_defects(parameters.get("defects", ()), count)
+    missing = {
+        int(item["particle_index"])
+        for item in defects
+        if bool(item.get("missing", False))
+    }
+    if len(missing) == count:
+        raise ParticleLineError("At least one particle must remain in the line.")
     shifts = {
         int(item["particle_index"]): tuple(item["shift_um"])
-        for item in validate_defects(parameters.get("defects", ()), count)
+        for item in defects
+        if not bool(item.get("missing", False))
     }
 
     result: list[ParticlePosition] = []
     for index in range(count):
+        if index in missing:
+            continue
         ideal = (first_x + index * spacing, particle_y, center_z)
         shift = shifts.get(index, (0.0, 0.0, 0.0))
         actual = tuple(ideal[axis] + shift[axis] for axis in range(3))
@@ -161,6 +195,21 @@ def particle_line_positions(parameters: Mapping[str, Any]) -> tuple[ParticlePosi
     return tuple(result)
 
 
+def missing_particle_indices(
+    defects: Any,
+    particle_count: int | None = None,
+) -> tuple[int, ...]:
+    """Return sorted nominal indices removed by vacancy defects."""
+
+    return tuple(
+        sorted(
+            int(item["particle_index"])
+            for item in validate_defects(defects, particle_count)
+            if bool(item.get("missing", False))
+        )
+    )
+
+
 def line_extents(parameters: Mapping[str, Any]) -> tuple[float, float, float]:
     """Return an axis-aligned structure extent including the substrate depth."""
 
@@ -183,6 +232,7 @@ __all__ = [
     "ParticleLineError",
     "ParticlePosition",
     "line_extents",
+    "missing_particle_indices",
     "particle_diameter",
     "particle_line_positions",
     "validate_defects",

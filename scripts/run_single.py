@@ -25,11 +25,12 @@ from surface_plasmons.project import (
     make_simulation_config,
     normalise_project_config,
 )
+from surface_plasmons.particle_line import particle_line_positions
 from surface_plasmons.results import ResultsError
 from surface_plasmons.workflow import WorkflowError, run_project
 
 
-DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "perfect_line.json"
+DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "equation2_perfect_line_homogeneous.json"
 
 
 def _duration(seconds: float) -> str:
@@ -81,7 +82,14 @@ def main() -> None:
     print(f"Simulation: {config['simulation_name']}")
     print(f"Configuration: {args.config.resolve()}")
     print(f"Precision: {config['precision']}")
-    print(f"Particles: {config['geometry']['particle_count']} {config['geometry']['particle_shape']}(s)")
+    active_particles = particle_line_positions(
+        {**preview["geometry_parameters"], "center": (0.0, 0.0, 0.0)}
+    )
+    print(
+        "Particles: "
+        f"{len(active_particles)} active of {config['geometry']['particle_count']} nominal "
+        f"{config['geometry']['particle_shape']}(s)"
+    )
     print(
         "Broadband estimate: "
         f"{_duration(float(estimate['estimated_min_seconds']))} to "

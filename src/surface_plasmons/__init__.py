@@ -61,6 +61,7 @@ from .particle_line import (
     ParticleLineError,
     ParticlePosition,
     line_extents,
+    missing_particle_indices,
     particle_diameter,
     particle_line_positions,
     validate_defects,
@@ -106,6 +107,9 @@ from .theory import (
     FieldComparison,
     INTERACTION_MODELS,
     InteractionModel,
+    MieSphereResult,
+    OneDimensionalOrientation,
+    OneDimensionalResult,
     POLARIZABILITY_MODELS,
     PolarizabilityModel,
     ProfileComparison,
@@ -114,12 +118,19 @@ from .theory import (
     compare_profiles,
     component_vector,
     coupled_dipole_profile,
+    dipole_cross_sections,
     electric_field_from_dipoles,
     equation2_interaction_tensor_A,
+    mie_dipole_polarizability,
+    mie_sphere_cross_sections,
+    one_dimensional_dipole_sum,
+    one_dimensional_interaction_A,
     paper_equation3_interaction_tensor_A,
     quasistatic_green_tensor,
     solve_coupled_dipoles,
+    solve_one_dimensional_chain,
     sphere_polarizability,
+    uniform_chain_dipole_moment,
 )
 from .validation import ValidationError, resolve_experiment, run_validation
 from .visualization import (
@@ -140,7 +151,7 @@ from .visualization import (
 )
 from .workflow import StageFields, WorkflowError, load_stage_fields, run_project
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 __all__ = [
     "DEFAULT_STYLE",
@@ -160,6 +171,9 @@ __all__ = [
     "MaterialError",
     "MaterialModel",
     "MaterialSpec",
+    "MieSphereResult",
+    "OneDimensionalOrientation",
+    "OneDimensionalResult",
     "OutputConfig",
     "ParticleLineError",
     "ParticlePosition",
@@ -207,6 +221,7 @@ __all__ = [
     "coupled_dipole_profile",
     "default_database_path",
     "dielectric_function",
+    "dipole_cross_sections",
     "electric_field_from_dipoles",
     "estimate_runtime",
     "equation2_interaction_tensor_A",
@@ -234,7 +249,12 @@ __all__ = [
     "logarithmic_axis",
     "material_catalog",
     "make_simulation_config",
+    "mie_dipole_polarizability",
+    "mie_sphere_cross_sections",
+    "missing_particle_indices",
     "normalise_project_config",
+    "one_dimensional_dipole_sum",
+    "one_dimensional_interaction_A",
     "parameter_sweep",
     "paper_equation3_interaction_tensor_A",
     "POLARIZABILITY_MODELS",
@@ -263,11 +283,13 @@ __all__ = [
     "spp_wavevector",
     "sphere_polarizability",
     "solve_coupled_dipoles",
+    "solve_one_dimensional_chain",
     "safe_simulation_name",
     "validate_config",
     "validate_geometry_parameters",
     "validate_material_band",
     "validate_defects",
+    "uniform_chain_dipole_moment",
     "resolve_experiment",
     "ExperimentWorkspace",
 ]

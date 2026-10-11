@@ -8,11 +8,18 @@ from surface_plasmons.theory import (
     compare_complex_fields,
     compare_profiles,
     coupled_dipole_profile,
+    dipole_cross_sections,
     electric_field_from_dipoles,
     equation2_interaction_tensor_A,
+    mie_dipole_polarizability,
+    mie_sphere_cross_sections,
+    one_dimensional_dipole_sum,
+    one_dimensional_interaction_A,
     paper_equation3_interaction_tensor_A,
     solve_coupled_dipoles,
+    solve_one_dimensional_chain,
     sphere_polarizability,
+    uniform_chain_dipole_moment,
 )
 
 
@@ -189,6 +196,114 @@ def test_two_retarded_longitudinal_dipoles_match_closed_form() -> None:
     assert solution.dipole_moments[:, 1:] == pytest.approx(0.0, abs=1e-14)
 
 
+@pytest.mark.parametrize("interaction_model", ["quasistatic", "paper_retarded"])
+@pytest.mark.parametrize(
+    ("orientation", "polarisation", "component_index"),
+    [
+        ("longitudinal", (1.0, 0.0, 0.0), 0),
+        ("transverse", (0.0, 0.0, 1.0), 2),
+    ],
+)
+def test_direct_1d_solver_matches_vector_cda(
+    interaction_model: str,
+    orientation: str,
+    polarisation: tuple[float, float, float],
+    component_index: int,
+) -> None:
+    x = np.asarray([-0.3, -0.15, 0.02, 0.15, 0.3])
+    positions = np.column_stack((x, np.full(x.size, 0.04), np.zeros(x.size)))
+    alpha = 1.0e-4 + 2.0e-5j
+    common_incident_phase = np.exp(-1j * 2.0 * math.pi * 0.04 / 0.633)
+    scalar = solve_one_dimensional_chain(
+        x,
+        alpha,
+        wavelength_um=0.633,
+        orientation=orientation,
+        incident_amplitude=common_incident_phase,
+        interaction_model=interaction_model,
+    )
+    vector = solve_coupled_dipoles(
+        positions,
+        alpha,
+        wavelength_um=0.633,
+        incident_direction=(0.0, -1.0, 0.0),
+        incident_polarisation=polarisation,
+        interaction_model=interaction_model,
+    )
+
+    assert scalar.local_fields == pytest.approx(
+        vector.local_fields[:, component_index], rel=1e-12, abs=1e-12
+    )
+    assert scalar.dipole_moments == pytest.approx(
+        vector.dipole_moments[:, component_index], rel=1e-12, abs=1e-12
+    )
+
+
+def test_direct_1d_interaction_and_equation4_dipole_sum() -> None:
+    spacing = 0.15
+    wavelength = 0.633
+    neighbour_count = 4
+    direct_sum = -2.0 * sum(
+        one_dimensional_interaction_A(
+            order * spacing,
+            wavelength_um=wavelength,
+            orientation="longitudinal",
+            model="paper_retarded",
+        )
+        for order in range(1, neighbour_count + 1)
+    )
+    dipole_sum = one_dimensional_dipole_sum(
+        spacing,
+        wavelength_um=wavelength,
+        neighbour_count=neighbour_count,
+        orientation="longitudinal",
+        interaction_model="paper_retarded",
+    )
+    alpha = 1.0e-4 + 2.0e-5j
+
+    assert dipole_sum == pytest.approx(direct_sum, rel=1e-13, abs=1e-13)
+    assert uniform_chain_dipole_moment(alpha, dipole_sum) == pytest.approx(
+        1.0 / (1.0 / alpha - direct_sum), rel=1e-13, abs=1e-13
+    )
+
+
+def test_mie_dipole_polarizability_reaches_quasistatic_small_sphere_limit() -> None:
+    radius = 1.0e-3
+    wavelength = 0.633
+    epsilon = -10.0 + 1.0j
+    exact_a1 = mie_dipole_polarizability(radius, wavelength, epsilon)
+    quasistatic = sphere_polarizability(radius, epsilon, 1.0)
+
+    assert exact_a1 == pytest.approx(quasistatic, rel=1e-3)
+
+
+def test_exact_mie_lossless_sphere_conserves_energy() -> None:
+    result = mie_sphere_cross_sections(0.04, 0.633, 2.25 + 0.0j)
+
+    assert result.extinction_cross_section_um2 == pytest.approx(
+        result.scattering_cross_section_um2, rel=1e-12, abs=1e-14
+    )
+    assert result.absorption_cross_section_um2 == pytest.approx(0.0, abs=1e-14)
+    assert result.maximum_order >= 1
+
+
+def test_mie_a1_polarizability_reproduces_electric_dipole_cross_sections() -> None:
+    radius = 0.04
+    wavelength = 0.633
+    epsilon = -10.0 + 1.0j
+    mie = mie_sphere_cross_sections(radius, wavelength, epsilon)
+    alpha = mie_dipole_polarizability(radius, wavelength, epsilon)
+    cross_sections = dipole_cross_sections(alpha, wavelength)
+    wavevector = 2.0 * math.pi / wavelength
+    expected_electric_dipole_extinction = (
+        6.0 * math.pi * mie.electric_coefficients[0].real / wavevector**2
+    )
+
+    assert cross_sections["extinction_cross_section_um2"] == pytest.approx(
+        expected_electric_dipole_extinction, rel=1e-12, abs=1e-14
+    )
+
+
 def test_coupled_dipole_perfect_line_is_mirror_symmetric() -> None:
     positions = [(-0.3, 0.04, 0.0), (-0.15, 0.04, 0.0), (0.0, 0.04, 0.0), (0.15, 0.04, 0.0), (0.3, 0.04, 0.0)]
     alpha = sphere_polarizability(0.04, -10 + 1j, 1.0, wavelength_um=0.633)
@@ -253,3 +368,7 @@ def test_external_field_and_same_scale_comparison() -> None:
     assert np.all(np.isfinite(field))
     assert report.complex_nrmse == pytest.approx(0.0)
     assert report.amplitude_nrmse == pytest.approx(0.0)
+    mie_dipole_polarizability,
+    mie_sphere_cross_sections,
+    one_dimensional_dipole_sum,
+    one_dimensional_interaction_A,

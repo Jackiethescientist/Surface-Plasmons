@@ -43,6 +43,30 @@ def test_one_defect_changes_only_selected_particle() -> None:
     assert positions[3].actual_x_um == pytest.approx(0.15)
 
 
+def test_missing_particle_keeps_nominal_indices_and_removes_geometry() -> None:
+    positions = particle_line_positions(
+        _parameters(defects=[{"particle_index": 2, "missing": True}])
+    )
+
+    assert [item.particle_index for item in positions] == [0, 1, 3, 4]
+    assert [item.actual_x_um for item in positions] == pytest.approx(
+        [-0.3, -0.15, 0.15, 0.3]
+    )
+
+
+def test_missing_particle_cannot_also_have_a_shift() -> None:
+    with pytest.raises(ParticleLineError, match="both missing=true and shift_um"):
+        particle_line_positions(
+            _parameters(
+                defects=[
+                    {
+                        "particle_index": 2,
+                        "missing": True,
+                        "shift_um": [0.02, 0.0, 0.0],
+                    }
+                ]
+            )
+        )
 def test_overlapping_defect_is_rejected() -> None:
     with pytest.raises(ParticleLineError, match="overlap"):
         particle_line_positions(

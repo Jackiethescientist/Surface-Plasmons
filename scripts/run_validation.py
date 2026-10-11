@@ -1,13 +1,13 @@
 """Validate one explicitly selected saved particle-line simulation.
 
-Quick validation reads existing data only:
+Quick validation reads existing data only and evaluates the staged model hierarchy:
 
     python scripts/run_validation.py --simulation perfect_line_n9_spacing150nm
 
 Numerical convergence runs are optional because they can take many hours:
 
     python scripts/run_validation.py --simulation perfect_line_n9_spacing150nm \
-        --name final_validation --checks configuration,theory,resolution,domain,time
+        --name final_validation --checks configuration,theory,hierarchy,resolution,domain,time
 """
 
 from __future__ import annotations
@@ -34,8 +34,8 @@ def parse_args() -> Any:
     parser.add_argument("--name", default="validation_v1", help="Unique validation result name.")
     parser.add_argument(
         "--checks",
-        default="configuration,theory",
-        help="configuration,theory,resolution,domain,time or all.",
+        default="configuration,theory,hierarchy",
+        help="configuration,theory,hierarchy,resolution,domain,time or all.",
     )
     parser.add_argument("--results-root", type=Path)
     parser.add_argument("--resolutions", help="Optional comma-separated resolution values.")

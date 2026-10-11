@@ -1,5 +1,5 @@
 {
-  "simulation_name": "equation2_formal_benchmark_n9_homogeneous",
+  "simulation_name": "equation2_formal_benchmark_n9_homogeneous_v2",
   "precision": "fast",
   "geometry": {
     "particle_shape": "sphere",

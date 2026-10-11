@@ -8,7 +8,12 @@ from typing import Any, Mapping
 import json
 import math
 
-from .particle_line import line_extents, particle_diameter, particle_line_positions
+from .particle_line import (
+    line_extents,
+    missing_particle_indices,
+    particle_diameter,
+    particle_line_positions,
+)
 from .results import safe_simulation_name
 
 
@@ -139,7 +144,13 @@ def normalise_project_config(
     geometry = result["geometry"]
     parameters = geometry_parameters(result, include_particles=True)
     positions = particle_line_positions(parameters)
-    if len(positions) != int(geometry["particle_count"]):
+    missing_count = len(
+        missing_particle_indices(
+            geometry.get("defects", []),
+            int(geometry["particle_count"]),
+        )
+    )
+    if len(positions) != int(geometry["particle_count"]) - missing_count:
         raise ProjectConfigError("Particle-position generation failed.")
 
     source = result["source"]

@@ -1,7 +1,7 @@
 import csv
 
 from surface_plasmons.project import normalise_project_config
-from surface_plasmons.validation import _theory_check
+from surface_plasmons.validation import _hierarchy_check, _theory_check
 
 
 def _write_csv(path, fieldnames, rows):
@@ -75,6 +75,17 @@ def test_equation2_validation_keeps_common_scale_and_labels_axes(tmp_path) -> No
     assert report["maximum_equation2_residual"] < 1e-12
     assert (output / "equation2_field_amplitude_profile.png").is_file()
     assert not (output / "equation2_field_intensity_profile.png").exists()
+
+    hierarchy = _hierarchy_check(config, experiment, output)
+
+    assert hierarchy["status"] == "completed"
+    assert hierarchy["model_order"][0] == "direct scalar 1-D CDA"
+    assert hierarchy["model_order"][-1] == (
+        "3-D MEEP FDTD for the complete finite structure"
+    )
+    assert hierarchy["maximum_scalar_vs_vector_relative_error"] < 1e-12
+    assert (output / "model_hierarchy_comparison.png").is_file()
+    assert (output / "one_dimensional_defect_response.png").is_file()
 
 
 def test_formal_equation2_benchmark_rejects_substrate_interface(tmp_path) -> None:

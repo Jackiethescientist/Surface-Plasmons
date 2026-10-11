@@ -1,5 +1,5 @@
 {
-  "simulation_name": "equation2_perfect_line_n9_homogeneous",
+  "simulation_name": "equation2_perfect_line_n9_homogeneous_test",
   "precision": "fast",
   "geometry": {
     "particle_shape": "sphere",

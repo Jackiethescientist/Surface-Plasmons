@@ -398,7 +398,7 @@ GEOMETRIES: dict[str, GeometrySpec] = {
         "particle_line_on_substrate",
         "Finite particle line on a substrate",
         "finite_array",
-        "A finite 1-D line of spheres or cubes with explicitly positioned defects.",
+        "A finite 1-D line of spheres or cubes with displaced or missing-particle defects.",
         (3,),
         (
             P("particle", "material", "Particle material.", "au"),
@@ -412,7 +412,7 @@ GEOMETRIES: dict[str, GeometrySpec] = {
             P("substrate_thickness", "positive", "Represented substrate depth.", 0.300),
             P("surface_y", "number", "y coordinate of the substrate surface.", 0.0),
             P("particle_surface_gap", "nonnegative", "Gap between particles and substrate.", 0.0),
-            P("defects", "defects", "Particle-indexed displacement records.", ()),
+            P("defects", "defects", "Particle-indexed displacement or vacancy records.", ()),
             P("include_particles", "bool", "False produces the substrate-only reference.", True),
         ),
         aliases=("particle_line", "finite_particle_line", "defect_line"),

@@ -890,17 +890,27 @@ def run_project(
             map_reports.append(report)
             workspace.record_stage(stage, "completed", elapsed_seconds=result.elapsed_seconds)
 
+        active_positions = particle_line_positions(
+            {
+                **geometry_parameters(config, include_particles=True),
+                "center": (0.0, 0.0, 0.0),
+            }
+        )
         summary_rows = [
             {
                 "simulation_name": config["simulation_name"],
                 "precision": config["precision"],
                 "particle_count": config["geometry"]["particle_count"],
+                "active_particle_count": len(active_positions),
                 "particle_shape": config["geometry"]["particle_shape"],
                 "particle_material": config["geometry"]["particle_material"],
                 "substrate_material": config["geometry"]["substrate_material"],
                 "background_material": config["geometry"]["background_material"],
                 "spacing_um": config["geometry"]["spacing_um"],
                 "defect_count": len(config["geometry"].get("defects", [])),
+                "missing_particle_count": (
+                    int(config["geometry"]["particle_count"]) - len(active_positions)
+                ),
                 "polarisation": config["source"]["polarisation"],
                 "maximum_broadband_field_amplitude_enhancement": broadband[
                     "maximum_field_amplitude_enhancement"

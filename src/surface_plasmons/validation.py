@@ -10,15 +10,19 @@ import json
 import numpy as np
 
 from .database import find_project_root
-from .particle_line import particle_line_positions
+from .particle_line import missing_particle_indices, particle_line_positions
 from .project import PRECISION_MODES, geometry_parameters, normalise_project_config
 from .results import ExperimentWorkspace, ResultsError, safe_simulation_name
 from .theory import (
     compare_complex_fields,
     component_vector,
     electric_field_from_dipoles,
+    mie_sphere_cross_sections,
     solve_coupled_dipoles,
+    solve_one_dimensional_chain,
     sphere_polarizability,
+    one_dimensional_dipole_sum,
+    uniform_chain_dipole_moment,
 )
 from .workflow import _normalised_fields, run_broadband_stage
 
@@ -401,6 +405,510 @@ def _theory_check(config: Mapping[str, Any], experiment: Path, output: Path) -> 
     return report
 
 
+def _same_scale_spectrum_metrics(
+    reference: Sequence[float],
+    prediction: Sequence[float],
+) -> dict[str, float | int | None]:
+    measured = np.asarray(reference, dtype=float)
+    modelled = np.asarray(prediction, dtype=float)
+    scale = float(np.sqrt(np.mean(measured**2))) or 1.0
+    nrmse = float(np.sqrt(np.mean((modelled - measured) ** 2)) / scale)
+    correlation = (
+        float(np.corrcoef(measured, modelled)[0, 1])
+        if measured.size > 1 and np.std(measured) > 0 and np.std(modelled) > 0
+        else None
+    )
+    return {
+        "same_scale_nrmse": nrmse,
+        "correlation": correlation,
+        "meep_peak_index": int(np.argmax(measured)),
+        "model_peak_index": int(np.argmax(modelled)),
+    }
+
+
+def _coordinate_edges(values: np.ndarray, minimum_half_width: float) -> np.ndarray:
+    if values.size == 1:
+        return np.asarray(
+            [values[0] - minimum_half_width, values[0] + minimum_half_width],
+            dtype=float,
+        )
+    middle = 0.5 * (values[:-1] + values[1:])
+    return np.concatenate(
+        ([values[0] - (middle[0] - values[0])], middle, [values[-1] + (values[-1] - middle[-1])])
+    )
+
+
+def _hierarchy_check(config: Mapping[str, Any], experiment: Path, output: Path) -> dict[str, Any]:
+    """Compare 1-D CDA, vector CDA, Mie corrections, and 3-D MEEP.
+
+    Cross-sections and near-field amplitudes are deliberately drawn in
+    separate panels because they are different observables. Exact Mie theory
+    is used only for the single-sphere response; the array model labelled
+    ``Mie-dipole CDA`` uses Mie's electric ``a1`` coefficient as the particle
+    polarizability inside Equation 2.
+    """
+
+    requirements = {
+        "particle_shape": "sphere",
+        "environment": "homogeneous and lossless background",
+        "geometry": "active particle centres collinear along x",
+        "saved_data": "same-scale complex Ex/Ey/Ez broadband fields",
+    }
+    if config["geometry"]["particle_shape"] != "sphere":
+        report = {
+            "status": "skipped",
+            "reason": "The Mie and Equation-1 hierarchy implemented here requires spheres.",
+            "requirements": requirements,
+        }
+        _write_json(output / "model_hierarchy_summary.json", report)
+        return report
+    background_name = str(config["geometry"]["background_material"]).strip().lower()
+    substrate_name = str(config["geometry"]["substrate_material"]).strip().lower()
+    if background_name != substrate_name:
+        report = {
+            "status": "skipped",
+            "reason": (
+                "The staged CDA-Mie benchmark requires a homogeneous optical environment. "
+                "Run the separately named homogeneous perfect or defect configuration first."
+            ),
+            "requirements": requirements,
+        }
+        _write_json(output / "model_hierarchy_summary.json", report)
+        return report
+
+    field_rows = _read_csv(
+        experiment / "frequency_scan" / "field_strength_vs_position_and_frequency.csv"
+    )
+    dielectric_rows = _read_csv(
+        experiment / "frequency_scan" / "dielectric_function_vs_frequency.csv"
+    )
+    if not field_rows:
+        raise ValidationError("The selected simulation has no broadband field data.")
+    required = {
+        f"normalised_{component}_{part}"
+        for component in ("Ex", "Ey", "Ez")
+        for part in ("real", "imag")
+    }
+    if not required.issubset(field_rows[0]):
+        raise ValidationError(
+            "This simulation predates same-scale complex-field output. Re-run it before "
+            "using the model hierarchy validation."
+        )
+
+    parameters = {
+        **geometry_parameters(config, include_particles=True),
+        "center": (0.0, 0.0, 0.0),
+    }
+    positions = particle_line_positions(parameters)
+    centres = np.asarray(
+        [(item.actual_x_um, item.actual_y_um, item.actual_z_um) for item in positions],
+        dtype=float,
+    )
+    if np.ptp(centres[:, 1]) > 1e-12 or np.ptp(centres[:, 2]) > 1e-12:
+        report = {
+            "status": "skipped",
+            "reason": "The direct 1-D formulas require all active centres to remain on one x-directed line.",
+            "requirements": requirements,
+        }
+        _write_json(output / "model_hierarchy_summary.json", report)
+        return report
+
+    direction, polarisation = _source_vectors(config)
+    component_index = int(np.argmax(np.abs(polarisation)))
+    orientation = "longitudinal" if component_index == 0 else "transverse"
+    wavelengths_nm = sorted({float(row["wavelength_nm"]) for row in field_rows})
+    radius_um = float(config["geometry"]["particle_radius_um"])
+    defects = list(config["geometry"].get("defects", []))
+    missing_indices = missing_particle_indices(
+        defects,
+        int(config["geometry"]["particle_count"]),
+    )
+    shifted_indices = sorted(
+        int(item["particle_index"])
+        for item in defects
+        if not bool(item.get("missing", False))
+    )
+    is_perfect = not defects
+
+    spectrum_rows: list[dict[str, Any]] = []
+    particle_rows: list[dict[str, Any]] = []
+    local_scalar_by_wavelength: list[np.ndarray] = []
+    scalar_vector_relative_errors: list[float] = []
+    for wavelength_nm in wavelengths_nm:
+        wavelength_um = wavelength_nm / 1000.0
+        profile_rows = [
+            row
+            for row in field_rows
+            if abs(float(row["wavelength_nm"]) - wavelength_nm) < 1e-9
+        ]
+        profile_rows.sort(key=lambda row: float(row["x_um"]))
+        points = np.asarray(
+            [
+                [float(row["x_um"]), float(row["y_um"]), float(row["z_um"])]
+                for row in profile_rows
+            ],
+            dtype=float,
+        )
+        measured = np.asarray(
+            [
+                [
+                    complex(
+                        float(row[f"normalised_{component}_real"]),
+                        float(row[f"normalised_{component}_imag"]),
+                    )
+                    for component in ("Ex", "Ey", "Ez")
+                ]
+                for row in profile_rows
+            ],
+            dtype=complex,
+        )
+        epsilon_particle = _nearest_material_epsilon(
+            dielectric_rows, "particle", wavelength_nm
+        )
+        epsilon_background = _nearest_material_epsilon(
+            dielectric_rows, "background", wavelength_nm
+        )
+        epsilon_substrate = _nearest_material_epsilon(
+            dielectric_rows, "substrate", wavelength_nm
+        )
+        if abs(epsilon_substrate - epsilon_background) > 1e-10:
+            report = {
+                "status": "skipped",
+                "reason": (
+                    "The stored substrate and background dielectric functions differ, so the "
+                    "homogeneous CDA-Mie hierarchy is not applicable."
+                ),
+                "requirements": requirements,
+                "wavelength_nm": wavelength_nm,
+            }
+            _write_json(output / "model_hierarchy_summary.json", report)
+            return report
+        if abs(epsilon_background.imag) > 1e-12 or epsilon_background.real <= 0:
+            report = {
+                "status": "skipped",
+                "reason": "Exact Mie cross-sections require a positive, lossless background.",
+                "requirements": requirements,
+                "wavelength_nm": wavelength_nm,
+            }
+            _write_json(output / "model_hierarchy_summary.json", report)
+            return report
+
+        alpha_quasistatic = sphere_polarizability(
+            radius_um,
+            epsilon_particle,
+            epsilon_background,
+            wavelength_um=wavelength_um,
+            model="quasistatic",
+        )
+        alpha_mie = sphere_polarizability(
+            radius_um,
+            epsilon_particle,
+            epsilon_background,
+            wavelength_um=wavelength_um,
+            model="mie_electric_dipole",
+        )
+        wavevector = 2.0 * np.pi * np.sqrt(epsilon_background) / wavelength_um
+        common_incident_phase = np.exp(
+            1j
+            * wavevector
+            * (
+                centres[0, 1] * float(direction[1])
+                + centres[0, 2] * float(direction[2])
+            )
+        )
+        scalar = solve_one_dimensional_chain(
+            centres[:, 0],
+            alpha_quasistatic,
+            wavelength_um=wavelength_um,
+            epsilon_background=epsilon_background,
+            orientation=orientation,
+            incident_direction_cosine=float(direction[0]),
+            incident_amplitude=common_incident_phase,
+            interaction_model="paper_retarded",
+        )
+        vector_quasistatic = solve_coupled_dipoles(
+            centres,
+            alpha_quasistatic,
+            wavelength_um=wavelength_um,
+            epsilon_background=epsilon_background,
+            incident_direction=direction,
+            incident_polarisation=polarisation,
+            interaction_model="quasistatic",
+        )
+        vector_retarded = solve_coupled_dipoles(
+            centres,
+            alpha_quasistatic,
+            wavelength_um=wavelength_um,
+            epsilon_background=epsilon_background,
+            incident_direction=direction,
+            incident_polarisation=polarisation,
+            interaction_model="paper_retarded",
+        )
+        vector_mie = solve_coupled_dipoles(
+            centres,
+            alpha_mie,
+            wavelength_um=wavelength_um,
+            epsilon_background=epsilon_background,
+            incident_direction=direction,
+            incident_polarisation=polarisation,
+            interaction_model="paper_retarded",
+        )
+        field_quasistatic = electric_field_from_dipoles(
+            points,
+            vector_quasistatic,
+            epsilon_background=epsilon_background,
+            incident_direction=direction,
+            incident_polarisation=polarisation,
+        )
+        field_retarded = electric_field_from_dipoles(
+            points,
+            vector_retarded,
+            epsilon_background=epsilon_background,
+            incident_direction=direction,
+            incident_polarisation=polarisation,
+        )
+        field_mie = electric_field_from_dipoles(
+            points,
+            vector_mie,
+            epsilon_background=epsilon_background,
+            incident_direction=direction,
+            incident_polarisation=polarisation,
+        )
+        vector_local_component = vector_retarded.local_fields[:, component_index]
+        consistency_scale = float(np.linalg.norm(vector_local_component)) or 1.0
+        scalar_vector_error = float(
+            np.linalg.norm(scalar.local_fields - vector_local_component)
+            / consistency_scale
+        )
+        scalar_vector_relative_errors.append(scalar_vector_error)
+        local_scalar_by_wavelength.append(np.abs(scalar.local_fields))
+        for particle, local_field, dipole in zip(
+            positions, scalar.local_fields, scalar.dipole_moments
+        ):
+            particle_rows.append(
+                {
+                    "wavelength_nm": wavelength_nm,
+                    "particle_index": particle.particle_index,
+                    "actual_x_um": particle.actual_x_um,
+                    "defect_kind": (
+                        "shifted" if particle.particle_index in shifted_indices else "none"
+                    ),
+                    "local_field_real_over_E0": float(local_field.real),
+                    "local_field_imag_over_E0": float(local_field.imag),
+                    "local_field_amplitude_over_E0": float(abs(local_field)),
+                    "dipole_real_over_epsilon0_E0_um3": float(dipole.real),
+                    "dipole_imag_over_epsilon0_E0_um3": float(dipole.imag),
+                    "dipole_amplitude_over_epsilon0_E0_um3": float(abs(dipole)),
+                }
+            )
+
+        mie = mie_sphere_cross_sections(
+            radius_um,
+            wavelength_um,
+            epsilon_particle,
+            epsilon_background,
+        )
+        equation4_magnitude: float | str = ""
+        if is_perfect and len(positions) >= 3:
+            neighbours = max(1, (len(positions) - 1) // 2)
+            dipole_sum = one_dimensional_dipole_sum(
+                float(config["geometry"]["spacing_um"]),
+                wavelength_um=wavelength_um,
+                neighbour_count=neighbours,
+                epsilon_background=epsilon_background,
+                orientation=orientation,
+                interaction_model="paper_retarded",
+            )
+            equation4_magnitude = float(
+                abs(uniform_chain_dipole_moment(alpha_quasistatic, dipole_sum))
+            )
+        spectrum_rows.append(
+            {
+                "wavelength_nm": wavelength_nm,
+                "meep_max_external_E_over_Eref": float(
+                    np.max(np.linalg.norm(measured, axis=1))
+                ),
+                "cda_quasistatic_max_external_E_over_E0": float(
+                    np.max(np.linalg.norm(field_quasistatic, axis=1))
+                ),
+                "cda_equations2_3_max_external_E_over_E0": float(
+                    np.max(np.linalg.norm(field_retarded, axis=1))
+                ),
+                "mie_dipole_cda_max_external_E_over_E0": float(
+                    np.max(np.linalg.norm(field_mie, axis=1))
+                ),
+                "scalar_1d_max_local_E_over_E0": float(
+                    np.max(np.abs(scalar.local_fields))
+                ),
+                "vector_cda_max_local_E_over_E0": float(
+                    np.max(np.abs(vector_local_component))
+                ),
+                "scalar_vs_vector_relative_error": scalar_vector_error,
+                "equation4_uniform_dipole_magnitude_over_epsilon0_E0_um3": (
+                    equation4_magnitude
+                ),
+                "mie_exact_extinction_cross_section_um2": mie.extinction_cross_section_um2,
+                "mie_exact_scattering_cross_section_um2": mie.scattering_cross_section_um2,
+                "mie_exact_absorption_cross_section_um2": mie.absorption_cross_section_um2,
+                "mie_maximum_multipole_order": mie.maximum_order,
+            }
+        )
+
+    _write_csv(
+        output / "model_hierarchy_spectrum.csv",
+        tuple(spectrum_rows[0]),
+        spectrum_rows,
+    )
+    _write_csv(
+        output / "one_dimensional_particle_response.csv",
+        tuple(particle_rows[0]),
+        particle_rows,
+    )
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    wavelengths = np.asarray(wavelengths_nm, dtype=float)
+    meep_external = np.asarray(
+        [row["meep_max_external_E_over_Eref"] for row in spectrum_rows], dtype=float
+    )
+    quasistatic_external = np.asarray(
+        [row["cda_quasistatic_max_external_E_over_E0"] for row in spectrum_rows], dtype=float
+    )
+    retarded_external = np.asarray(
+        [row["cda_equations2_3_max_external_E_over_E0"] for row in spectrum_rows], dtype=float
+    )
+    mie_dipole_external = np.asarray(
+        [row["mie_dipole_cda_max_external_E_over_E0"] for row in spectrum_rows], dtype=float
+    )
+    scalar_local = np.asarray(
+        [row["scalar_1d_max_local_E_over_E0"] for row in spectrum_rows], dtype=float
+    )
+    vector_local = np.asarray(
+        [row["vector_cda_max_local_E_over_E0"] for row in spectrum_rows], dtype=float
+    )
+    figure, axes = plt.subplots(3, 1, figsize=(9.5, 13.0), sharex=False)
+    axes[0].plot(wavelengths, meep_external, label="3-D MEEP FDTD", linewidth=2.0)
+    axes[0].plot(wavelengths, quasistatic_external, label="Quasistatic CDA", linewidth=1.4)
+    axes[0].plot(wavelengths, retarded_external, label="Equations 2-3 CDA", linewidth=1.5)
+    axes[0].plot(wavelengths, mie_dipole_external, label="Mie-dipole CDA", linewidth=1.5)
+    axes[0].set_xlabel("Vacuum wavelength (nm)")
+    axes[0].set_ylabel(
+        "Maximum external field-amplitude ratio\n"
+        r"MEEP: $|E|/|E_{ref}|$; theory: $|E|/|E_0|$"
+    )
+    axes[0].set_title("Same-observable near-field model hierarchy")
+    axes[0].grid(alpha=0.22)
+    axes[0].legend(frameon=False)
+
+    axes[1].plot(wavelengths, scalar_local, label="Direct scalar 1-D CDA", linewidth=1.8)
+    axes[1].plot(wavelengths, vector_local, "--", label="3-D vector CDA component", linewidth=1.5)
+    axes[1].set_xlabel("Vacuum wavelength (nm)")
+    axes[1].set_ylabel(r"Maximum local field-amplitude ratio, $|E_{loc}|/|E_0|$")
+    axes[1].set_title("Direct 1-D formula check against the vector Equation-2 solver")
+    axes[1].grid(alpha=0.22)
+    axes[1].legend(frameon=False)
+
+    axes[2].plot(
+        wavelengths,
+        [row["mie_exact_extinction_cross_section_um2"] for row in spectrum_rows],
+        label="Extinction",
+    )
+    axes[2].plot(
+        wavelengths,
+        [row["mie_exact_scattering_cross_section_um2"] for row in spectrum_rows],
+        label="Scattering",
+    )
+    axes[2].plot(
+        wavelengths,
+        [row["mie_exact_absorption_cross_section_um2"] for row in spectrum_rows],
+        label="Absorption",
+    )
+    axes[2].set_xlabel("Vacuum wavelength (nm)")
+    axes[2].set_ylabel(r"Single-sphere cross-section ($\mu m^2$)")
+    axes[2].set_title("Exact single-sphere Mie theory; not the array near-field observable")
+    axes[2].grid(alpha=0.22)
+    axes[2].legend(frameon=False)
+    figure.tight_layout()
+    figure.savefig(output / "model_hierarchy_comparison.png", dpi=230, bbox_inches="tight")
+    plt.close(figure)
+
+    nominal_count = int(config["geometry"]["particle_count"])
+    heatmap = np.full((len(wavelengths), nominal_count), np.nan, dtype=float)
+    for wavelength_index, amplitudes in enumerate(local_scalar_by_wavelength):
+        for particle, amplitude in zip(positions, amplitudes):
+            heatmap[wavelength_index, particle.particle_index] = float(amplitude)
+    figure, axis = plt.subplots(figsize=(9.2, 5.8))
+    colour_map = plt.get_cmap("magma").copy()
+    colour_map.set_bad("lightgray")
+    image = axis.pcolormesh(
+        np.arange(nominal_count + 1, dtype=float) - 0.5,
+        _coordinate_edges(wavelengths, 0.5),
+        heatmap,
+        shading="flat",
+        cmap=colour_map,
+    )
+    axis.set_xticks(np.arange(nominal_count))
+    axis.set_xlabel("Nominal particle index along the x-directed line")
+    axis.set_ylabel("Vacuum wavelength (nm)")
+    axis.set_title("Direct 1-D CDA local-field response; gray columns are missing particles")
+    figure.colorbar(
+        image,
+        ax=axis,
+        label=r"Local field-amplitude ratio, $|E_{loc}|/|E_0|$",
+    )
+    figure.tight_layout()
+    figure.savefig(output / "one_dimensional_defect_response.png", dpi=230, bbox_inches="tight")
+    plt.close(figure)
+
+    report = {
+        "status": "completed",
+        "requirements": requirements,
+        "orientation": orientation,
+        "active_particle_count": len(positions),
+        "nominal_particle_count": int(config["geometry"]["particle_count"]),
+        "shifted_particle_indices": shifted_indices,
+        "missing_particle_indices": list(missing_indices),
+        "maximum_scalar_vs_vector_relative_error": max(scalar_vector_relative_errors),
+        "model_order": [
+            "direct scalar 1-D CDA",
+            "3-D vector quasistatic CDA",
+            "3-D vector retarded Equations 2-3 CDA",
+            "Mie electric-dipole polarizability inside retarded CDA",
+            "exact multipole Mie theory for one sphere",
+            "3-D MEEP FDTD for the complete finite structure",
+        ],
+        "same_observable_external_field_comparisons": {
+            "quasistatic_cda_vs_meep": _same_scale_spectrum_metrics(
+                meep_external, quasistatic_external
+            ),
+            "retarded_equations2_3_cda_vs_meep": _same_scale_spectrum_metrics(
+                meep_external, retarded_external
+            ),
+            "mie_dipole_cda_vs_meep": _same_scale_spectrum_metrics(
+                meep_external, mie_dipole_external
+            ),
+        },
+        "equation4_dipole_sum": (
+            "reported for the undefected equal-spacing chain"
+            if is_perfect and len(positions) >= 3
+            else "not applied because Equation 4 assumes an identical periodic chain"
+        ),
+        "plot_scale_note": (
+            "Every axis and colorbar is labelled. Near-field amplitude ratios and Mie "
+            "cross-sections are separated because they are different physical observables."
+        ),
+        "limitations": [
+            "Exact Mie multipoles are a single-sphere benchmark, not a multiple-sphere solution.",
+            "Mie-dipole CDA retains only the electric a1 response for each sphere.",
+            "MEEP is the highest-level full-wave array calculation in this project.",
+        ],
+    }
+    _write_json(output / "model_hierarchy_summary.json", report)
+    return report
+
+
 def _response_from_fields(
     actual: Any, reference: Any, config: Mapping[str, Any]
 ) -> np.ndarray:
@@ -505,7 +1013,7 @@ def run_validation(
     experiment: str | Path,
     *,
     validation_name: str,
-    checks: Sequence[str] = ("configuration", "theory"),
+    checks: Sequence[str] = ("configuration", "theory", "hierarchy"),
     results_root: str | Path | None = None,
     resolutions: Sequence[int] | None = None,
     paddings_um: Sequence[float] | None = None,
@@ -515,8 +1023,8 @@ def run_validation(
     config = _load_config(directory)
     selected = {str(value).strip().lower() for value in checks}
     if "all" in selected:
-        selected = {"configuration", "theory", "resolution", "domain", "time"}
-    unknown = selected - {"configuration", "theory", "resolution", "domain", "time"}
+        selected = {"configuration", "theory", "hierarchy", "resolution", "domain", "time"}
+    unknown = selected - {"configuration", "theory", "hierarchy", "resolution", "domain", "time"}
     if unknown:
         raise ValidationError(f"Unknown validation check(s): {sorted(unknown)}.")
     validation_root = directory / "validation"
@@ -533,6 +1041,8 @@ def run_validation(
             reports["configuration"] = _configuration_check(config, workspace.directory)
         if "theory" in selected:
             reports["theory"] = _theory_check(config, directory, workspace.directory)
+        if "hierarchy" in selected:
+            reports["hierarchy"] = _hierarchy_check(config, directory, workspace.directory)
         if "resolution" in selected:
             if resolutions is None:
                 base = int(PRECISION_MODES[config["precision"]]["broadband_resolution"])
