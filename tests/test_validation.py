@@ -64,7 +64,36 @@ def test_equation2_validation_keeps_common_scale_and_labels_axes(tmp_path) -> No
     report = _theory_check(config, experiment, output)
 
     assert report["status"] == "completed"
+    assert report["benchmark"] == "formal_equation2_homogeneous"
+    assert report["benchmark_status"] == "passed_preconditions"
+    assert report["interaction_model"] == "paper_retarded"
+    assert report["polarizability_model"] == "quasistatic"
+    assert report["finite_size_corrections"] == (
+        "disabled for the strict Section-2.1 baseline"
+    )
     assert report["normalization"]["independent_curve_rescaling"] is False
     assert report["maximum_equation2_residual"] < 1e-12
     assert (output / "equation2_field_amplitude_profile.png").is_file()
     assert not (output / "equation2_field_intensity_profile.png").exists()
+
+
+def test_formal_equation2_benchmark_rejects_substrate_interface(tmp_path) -> None:
+    config = normalise_project_config(
+        {
+            "simulation_name": "equation2-substrate-not-formal",
+            "geometry": {
+                "particle_count": 1,
+                "background_material": "air",
+                "substrate_material": "sio2",
+            },
+        }
+    )
+    output = tmp_path / "validation"
+
+    report = _theory_check(config, tmp_path / "experiment", output)
+
+    assert report["status"] == "skipped"
+    assert report["benchmark"] == "formal_equation2_homogeneous"
+    assert report["benchmark_status"] == "failed_precondition"
+    assert "no substrate interface" in report["reason"]
+    assert not (output / "equation2_field_amplitude_profile.png").exists()

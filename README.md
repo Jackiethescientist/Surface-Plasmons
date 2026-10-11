@@ -18,7 +18,7 @@ use nanometres only where the field name explicitly ends in `_nm`.
 
 - A finite line of spheres or cubes on a dielectric substrate.
 - Explicit one- or two-particle position defects.
-- Broadband complex `Ex`, `Ey`, `Ez`, field-amplitude enhancement and field-intensity enhancement versus position and frequency.
+- Broadband complex `Ex`, `Ey`, `Ez`, and field-amplitude enhancement versus position and frequency.
 - Complex dielectric function versus frequency for particle, substrate and background.
 - Optional narrowband full-volume maps on the `xy`, `xz` and `yz` planes.
 - Substrate-only reference calculations with compatible-result caching.
@@ -143,7 +143,6 @@ data/results/one_defect_n9_particle4_dx20nm/
 │   ├── field_response_summary.csv
 │   ├── selected_frequencies.csv
 │   ├── field_position_frequency_heatmap.png (amplitude, |E|/|E_reference|)
-│   ├── field_intensity_position_frequency_heatmap.png (squared intensity ratio)
 │   └── particle_field_spectra.png
 ├── field_maps/
 │   └── <wavelength>nm/
@@ -151,8 +150,7 @@ data/results/one_defect_n9_particle4_dx20nm/
 │       ├── field_Ey.npy
 │       ├── field_Ez.npy
 │       ├── field_amplitude_enhancement.npy
-│       ├── field_intensity_enhancement.npy
-│       ├── field_total_enhancement.npy (legacy intensity alias)
+│       ├── field_total_enhancement.npy (amplitude alias)
 │       ├── coordinates.npz
 │       ├── field_components_xy.png
 │       ├── field_components_xz.png
@@ -181,20 +179,19 @@ each frequency. That reference is the robust spatial value of the driven
 component (`Ex` by default) from the particle-free run. A single scale preserves
 the spatial profile and avoids divisions by isolated near-zero reference pixels.
 
-The total field amplitude and intensity are calculated using all three complex
+The total field-amplitude ratio is calculated using all three complex
 components:
 
 ```text
 F_E(r,f) = sqrt(|Ex/Eref|² + |Ey/Eref|² + |Ez/Eref|²)
-F_I(r,f) = F_E(r,f)²
 ```
 
-Every plot title and colour bar states which scale it displays. The legacy
-`total_field_enhancement` output is retained for compatibility and means
-intensity enhancement, `F_I`. Full-volume maps retain pointwise particle-free
-intensity normalization because they compare matching spatial grids. The
-reference keeps the substrate and removes only the particles; compatible
-references are reused across configurations.
+All component maps, total-field maps, spectra, summaries, peak selection and
+Equation-2 validation use this unsquared amplitude ratio. The legacy
+`total_field_enhancement` name is retained for compatibility but now also means
+`F_E`. Full-volume maps use the matching particle-free field amplitude at each
+point. The reference keeps the substrate and removes only the particles;
+compatible references are reused across configurations.
 
 ## Validation
 
@@ -237,11 +234,23 @@ E_loc,i = E0 exp(i k.r_i) - sum_(j != i) A_ij.P_j,
 P_i = alpha_i E_loc,i.
 ```
 
-For the quasistatic Green tensor `G`, the code defines `A_ij = -G_ij`; therefore
-the paper's `-A_ij.P_j` is the physical dipole field `+G_ij.P_j`. The solver
-includes the incident phase and all Cartesian dipole components. Validation
-evaluates the solved dipoles at the exact external MEEP sample points, compares
-the complex fields on one common scale, and reports the Equation-2 residual.
+The interaction approximation must now be selected explicitly. `quasistatic`
+uses only the electrostatic `1/r^3` tensor. `paper_retarded` implements the
+paper's Equation 3, including its `1/r^3`, `1/r^2`, `1/r`, phase, and sign
+terms. In both cases `A_ij = -G_ij`, so the paper's `-A_ij.P_j` is the physical
+dipole field `+G_ij.P_j`.
+
+The Equation-2 validation uses the paper's retarded Equation-3 interaction
+together with the quasistatic Equation-1 sphere polarizability. Radiation
+reaction is a separate, explicitly selected polarizability model and is not
+silently enabled by supplying a wavelength. See
+[`EQUATION_2_MODEL_NOTES.md`](EQUATION_2_MODEL_NOTES.md) for the equations,
+units, inferred time convention, and independent checks.
+
+The solver includes the incident phase and all Cartesian dipole components.
+Validation evaluates the solved dipoles at the exact external MEEP sample
+points, compares the complex fields on one common scale, and reports the
+Equation-2 residual.
 
 Start with the optically homogeneous
 `configs/equation2_perfect_line_homogeneous.json` case. For configurations with
@@ -250,8 +259,9 @@ labels it as an approximation rather than claiming that it is the exact
 homogeneous-medium Equation 2.
 
 This baseline is deliberately limited: it does not contain the full retarded
-substrate dyadic Green tensor or higher multipoles. Those limitations are part
-of the research question rather than being hidden.
+substrate dyadic Green tensor, dynamic depolarization inside a finite particle,
+or higher multipoles. Those limitations are part of the research question
+rather than being hidden.
 
 ## Generic sweeps
 

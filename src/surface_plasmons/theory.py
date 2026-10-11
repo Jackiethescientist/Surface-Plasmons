@@ -1,19 +1,34 @@
-"""Equation-2 coupled-dipole model for finite particle lines.
+"""Coupled-dipole models for finite particle lines.
 
-The implementation uses the paper's convention
+The paper's Section 2 convention is
 
-    E_loc,i = E0 exp(i k.r_i) - sum_(j != i) A_ij . P_j,
+    E_loc,i = E0 exp(i k.r_i) - sum_(j != i) A_ij . P_j,       (2)
     P_i = alpha_i E_loc,i.
 
-Lengths are micrometres. Dipole moments are stored as ``P / epsilon_0`` and
-therefore have units of electric field times um^3. With this convention the
-sphere polarizability has units of um^3 and all epsilon-zero factors cancel.
+Its Equation 3 is a *retarded* dipole interaction.  This module therefore
+keeps two interaction models separate:
+
+``quasistatic``
+    The strict electrostatic ``1/r^3`` limit.
+``paper_retarded``
+    The complete ``1/r^3``, ``1/r^2`` and ``1/r`` interaction printed in the
+    paper's Equation 3.
+
+The paper writes its vacuum sphere polarizability as
+``alpha = 4*pi*a^3*(epsilon-1)/(epsilon+2)``.  Here the stored moment is the SI
+moment divided by ``epsilon_0``.  Consequently ``alpha`` has units of um^3 and
+the host-medium conversion is included explicitly in both alpha and A.  For a
+vacuum background this reduces exactly to the paper's equations.
+
+The paper does not state a phasor time convention explicitly.  Its outgoing
+``exp(+i*k*r)`` Green function is consistent with suppressed ``exp(-i*omega*t)``
+time dependence; that convention is used here.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Literal, Sequence
 import math
 
 import numpy as np
@@ -21,6 +36,13 @@ import numpy as np
 
 class TheoryError(ValueError):
     """Raised for invalid coupled-dipole inputs."""
+
+
+InteractionModel = Literal["quasistatic", "paper_retarded"]
+PolarizabilityModel = Literal["quasistatic", "radiation_reaction"]
+
+INTERACTION_MODELS = frozenset({"quasistatic", "paper_retarded"})
+POLARIZABILITY_MODELS = frozenset({"quasistatic", "radiation_reaction"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +100,7 @@ class CoupledDipoleResult:
     interaction_matrix_A: np.ndarray
     system_matrix: np.ndarray
     wavelength_um: float
+    interaction_model: str = "quasistatic"
     equation: str = "E_loc,i = E0 exp(i k.r_i) - sum_(j!=i) A_ij.P_j"
 
 
@@ -123,29 +146,48 @@ def sphere_polarizability(
     epsilon_background: complex,
     *,
     wavelength_um: float | None = None,
-    radiation_correction: bool = True,
+    model: PolarizabilityModel = "quasistatic",
+    radiation_correction: bool | None = None,
 ) -> complex:
-    """Return ``P/epsilon_0 = alpha E_loc`` for a small sphere.
+    """Return ``P/epsilon_0 = alpha E_loc`` for a sphere dipole.
 
-    The background-permittivity factor is included consistently with the
-    Green tensor. A radiation-reaction correction is optional; the interaction
-    itself remains the quasistatic Equation-2 baseline.
+    ``model="quasistatic"`` is the host-medium form of the paper's Equation 1
+    and is the default baseline. ``model="radiation_reaction"`` applies only
+    the radiation-reaction correction; it is deliberately opt-in because the
+    paper treats finite-size corrections separately in Section 2.2.
+
+    ``radiation_correction`` remains as a compatibility keyword. New code
+    should use the named ``model`` so the approximation level is explicit.
     """
 
     if radius_um <= 0:
         raise TheoryError("radius_um must be positive.")
     eps_p = complex(epsilon_particle)
     eps_b = complex(epsilon_background)
+    if model not in POLARIZABILITY_MODELS:
+        raise TheoryError(
+            f"Unknown polarizability model {model!r}; choose one of "
+            f"{sorted(POLARIZABILITY_MODELS)}."
+        )
+    if radiation_correction is not None:
+        compatibility_model: PolarizabilityModel = (
+            "radiation_reaction" if radiation_correction else "quasistatic"
+        )
+        if model != "quasistatic" and model != compatibility_model:
+            raise TheoryError("Conflicting polarizability model options were supplied.")
+        model = compatibility_model
     denominator = eps_p + 2.0 * eps_b
     if abs(denominator) <= 1e-30:
         raise TheoryError("The quasistatic polarizability denominator is zero.")
     alpha0 = 4.0 * math.pi * eps_b * radius_um**3 * (
         (eps_p - eps_b) / denominator
     )
-    if wavelength_um is None or not radiation_correction:
+    if model == "quasistatic":
         return complex(alpha0)
-    if wavelength_um <= 0:
-        raise TheoryError("wavelength_um must be positive.")
+    if wavelength_um is None or wavelength_um <= 0:
+        raise TheoryError(
+            "wavelength_um must be positive for the radiation_reaction model."
+        )
     wavevector = 2.0 * math.pi * np.sqrt(eps_b) / wavelength_um
     return complex(
         alpha0 / (1.0 - 1j * wavevector**3 * alpha0 / (6.0 * math.pi * eps_b))
@@ -168,17 +210,73 @@ def quasistatic_green_tensor(
     ) / (4.0 * math.pi * complex(epsilon_background) * distance**3)
 
 
+def paper_equation3_interaction_tensor_A(
+    displacement_um: Sequence[float],
+    *,
+    wavelength_um: float,
+    epsilon_background: complex = 1.0 + 0.0j,
+) -> np.ndarray:
+    """Return the retarded ``A_ij`` printed in the paper's Equation 3.
+
+    ``wavelength_um`` is the vacuum wavelength. The paper writes
+    ``k = 2*pi/lambda``; for a homogeneous host this implementation uses
+    ``k = 2*pi*sqrt(epsilon_background)/wavelength_vacuum``. The prefactor
+    converts the paper's vacuum volume-polarizability convention to the
+    reduced-SI moment ``P/epsilon_0`` used by this project.
+
+    The tensor is invariant when the displacement direction is reversed, so
+    it is compatible with the paper's definition of ``r_ij`` from i to j and
+    this solver's source-to-observation displacement.
+    """
+
+    if wavelength_um <= 0:
+        raise TheoryError("wavelength_um must be positive.")
+    displacement = np.asarray(displacement_um, dtype=float)
+    distance = float(np.linalg.norm(displacement))
+    if distance <= 0:
+        raise TheoryError("Dipole separation must be positive.")
+    eps_b = complex(epsilon_background)
+    direction = displacement / distance
+    direction_dyad = np.outer(direction, direction)
+    identity = np.eye(3)
+    wavevector = 2.0 * math.pi * np.sqrt(eps_b) / wavelength_um
+    phase = np.exp(1j * wavevector * distance)
+    near_field = (1.0 - 1j * wavevector * distance) * (
+        identity - 3.0 * direction_dyad
+    ) / distance**3
+    radiation_field = wavevector**2 * (direction_dyad - identity) / distance
+    return phase * (near_field + radiation_field) / (4.0 * math.pi * eps_b)
+
+
 def equation2_interaction_tensor_A(
     displacement_um: Sequence[float],
     epsilon_background: complex = 1.0 + 0.0j,
+    *,
+    wavelength_um: float | None = None,
+    model: InteractionModel = "quasistatic",
 ) -> np.ndarray:
-    """Return the paper's ``A_ij`` tensor for the quasistatic baseline.
+    """Return ``A_ij`` for an explicitly selected Equation-2 model.
 
     The physical dipole field is ``G.P``. Because Equation 2 writes the
-    interaction as ``-A.P``, this convention requires ``A = -G``.
+    interaction as ``-A.P``, both supported conventions use ``A = -G``.
     """
 
-    return -quasistatic_green_tensor(displacement_um, epsilon_background)
+    if model == "quasistatic":
+        return -quasistatic_green_tensor(displacement_um, epsilon_background)
+    if model == "paper_retarded":
+        if wavelength_um is None:
+            raise TheoryError(
+                "wavelength_um is required for the paper_retarded interaction."
+            )
+        return paper_equation3_interaction_tensor_A(
+            displacement_um,
+            wavelength_um=wavelength_um,
+            epsilon_background=epsilon_background,
+        )
+    raise TheoryError(
+        f"Unknown interaction model {model!r}; choose one of "
+        f"{sorted(INTERACTION_MODELS)}."
+    )
 
 
 def _image_transform(
@@ -200,19 +298,25 @@ def solve_coupled_dipoles(
     incident_direction: Sequence[float] = (0.0, -1.0, 0.0),
     incident_polarisation: Sequence[complex] = (1.0, 0.0, 0.0),
     incident_amplitude: complex = 1.0 + 0.0j,
+    interaction_model: InteractionModel = "quasistatic",
     epsilon_substrate: complex | None = None,
     surface_y_um: float = 0.0,
 ) -> CoupledDipoleResult:
     """Solve the complex vector form of Equation 2.
 
-    Direct particle interactions use exactly ``j != i``. When a substrate is
-    supplied, electrostatic image-dipole blocks are added as an explicitly
-    labelled approximation; the homogeneous direct-particle part still obeys
-    Equation 2 exactly.
+    Direct particle interactions use exactly ``j != i``. The caller must
+    explicitly select the strict quasistatic limit or the paper's retarded
+    Equation-3 tensor. When a substrate is supplied, electrostatic image-dipole
+    blocks are added as a separately labelled approximation.
     """
 
     if wavelength_um <= 0:
         raise TheoryError("wavelength_um must be positive.")
+    if interaction_model not in INTERACTION_MODELS:
+        raise TheoryError(
+            f"Unknown interaction model {interaction_model!r}; choose one of "
+            f"{sorted(INTERACTION_MODELS)}."
+        )
     positions = _coordinates(positions_um, "positions_um")
     count = len(positions)
     alphas = np.asarray(alpha, dtype=complex)
@@ -244,7 +348,10 @@ def solve_coupled_dipoles(
             column = slice(3 * j, 3 * j + 3)
             if i != j:
                 interaction_A[row, column] += equation2_interaction_tensor_A(
-                    positions[i] - positions[j], epsilon_background
+                    positions[i] - positions[j],
+                    epsilon_background,
+                    wavelength_um=wavelength_um,
+                    model=interaction_model,
                 )
             if image_transform is not None:
                 image_position = positions[j].copy()
@@ -252,7 +359,11 @@ def solve_coupled_dipoles(
                 displacement = positions[i] - image_position
                 if np.linalg.norm(displacement) > 1e-15:
                     interaction_A[row, column] += (
-                        equation2_interaction_tensor_A(displacement, epsilon_background)
+                        equation2_interaction_tensor_A(
+                            displacement,
+                            epsilon_background,
+                            model="quasistatic",
+                        )
                         @ image_transform
                     )
 
@@ -278,6 +389,7 @@ def solve_coupled_dipoles(
         interaction_matrix_A=interaction_A,
         system_matrix=system,
         wavelength_um=float(wavelength_um),
+        interaction_model=interaction_model,
     )
 
 
@@ -309,13 +421,20 @@ def electric_field_from_dipoles(
             displacement = point - position
             if np.linalg.norm(displacement) <= 1e-15:
                 raise TheoryError("Observation points cannot coincide with point dipoles.")
-            tensor_A = equation2_interaction_tensor_A(displacement, epsilon_background)
+            tensor_A = equation2_interaction_tensor_A(
+                displacement,
+                epsilon_background,
+                wavelength_um=solution.wavelength_um,
+                model=solution.interaction_model,
+            )
             fields[point_index] -= tensor_A @ solution.dipole_moments[particle_index]
             if image_transform is not None:
                 image_position = position.copy()
                 image_position[1] = 2.0 * surface_y_um - image_position[1]
                 image_A = equation2_interaction_tensor_A(
-                    point - image_position, epsilon_background
+                    point - image_position,
+                    epsilon_background,
+                    model="quasistatic",
                 ) @ image_transform
                 fields[point_index] -= image_A @ solution.dipole_moments[particle_index]
     return fields
@@ -331,6 +450,7 @@ def coupled_dipole_profile(
     epsilon_substrate: complex | None = None,
     surface_y_um: float = 0.0,
     wavelength_um: float = 1.0,
+    interaction_model: InteractionModel = "quasistatic",
 ) -> np.ndarray:
     """Return one component of the vector Equation-2 local-field solution."""
 
@@ -346,6 +466,7 @@ def coupled_dipole_profile(
         incident_direction=direction,
         incident_polarisation=polarisation,
         incident_amplitude=incident_field,
+        interaction_model=interaction_model,
         epsilon_substrate=epsilon_substrate,
         surface_y_um=surface_y_um,
     )
@@ -442,6 +563,10 @@ def compare_complex_fields(
 __all__ = [
     "CoupledDipoleResult",
     "FieldComparison",
+    "INTERACTION_MODELS",
+    "InteractionModel",
+    "POLARIZABILITY_MODELS",
+    "PolarizabilityModel",
     "ProfileComparison",
     "TheoryError",
     "compare_complex_fields",
@@ -450,6 +575,7 @@ __all__ = [
     "coupled_dipole_profile",
     "electric_field_from_dipoles",
     "equation2_interaction_tensor_A",
+    "paper_equation3_interaction_tensor_A",
     "quasistatic_green_tensor",
     "solve_coupled_dipoles",
     "sphere_polarizability",

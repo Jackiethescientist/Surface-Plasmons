@@ -123,12 +123,48 @@ def _source_vectors(config: Mapping[str, Any]) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _theory_check(config: Mapping[str, Any], experiment: Path, output: Path) -> dict[str, Any]:
-    """Compare MEEP and Equation 2 on the same external-field scale."""
+    """Compare MEEP with the paper's Section-2 CDA on one field scale.
 
+    This validation deliberately uses the paper's simplest internally named
+    combination: Equation-1 quasistatic sphere polarizability plus the
+    retarded Equation-3 interaction inside Equation 2. Radiation-reaction and
+    other Section-2.2 finite-size corrections are not silently mixed in.
+    """
+
+    benchmark_requirements = {
+        "particle_shape": "sphere",
+        "optical_environment": (
+            "homogeneous: geometry.background_material must equal "
+            "geometry.substrate_material"
+        ),
+        "substrate_interface": "absent",
+        "interaction_model": "paper_retarded",
+        "polarizability_model": "quasistatic",
+    }
     if config["geometry"]["particle_shape"] != "sphere":
         report = {
             "status": "skipped",
+            "benchmark": "formal_equation2_homogeneous",
+            "benchmark_status": "failed_precondition",
+            "benchmark_requirements": benchmark_requirements,
             "reason": "The Equation-2 polarizability used here is for spheres.",
+        }
+        _write_json(output / "theory_validation_summary.json", report)
+        return report
+    background_name = str(config["geometry"]["background_material"]).strip().lower()
+    substrate_name = str(config["geometry"]["substrate_material"]).strip().lower()
+    if background_name != substrate_name:
+        report = {
+            "status": "skipped",
+            "benchmark": "formal_equation2_homogeneous",
+            "benchmark_status": "failed_precondition",
+            "benchmark_requirements": benchmark_requirements,
+            "reason": (
+                "The formal Equation-2 benchmark requires an optically "
+                "homogeneous environment with no substrate interface. Set "
+                "geometry.substrate_material equal to geometry.background_material "
+                "and run the separately named homogeneous benchmark first."
+            ),
         }
         _write_json(output / "theory_validation_summary.json", report)
         return report
@@ -200,13 +236,30 @@ def _theory_check(config: Mapping[str, Any], experiment: Path, output: Path) -> 
     epsilon_background = _nearest_material_epsilon(dielectric_rows, "background", wavelength_nm)
     epsilon_substrate = _nearest_material_epsilon(dielectric_rows, "substrate", wavelength_nm)
     homogeneous_background = abs(epsilon_substrate - epsilon_background) <= 1e-10
-    substrate_for_model = None if homogeneous_background else epsilon_substrate
+    if not homogeneous_background:
+        report = {
+            "status": "skipped",
+            "benchmark": "formal_equation2_homogeneous",
+            "benchmark_status": "failed_precondition",
+            "benchmark_requirements": benchmark_requirements,
+            "reason": (
+                "The configured background and substrate names match, but their "
+                "stored dielectric functions differ at the selected wavelength. "
+                "The formal no-interface benchmark cannot proceed."
+            ),
+            "wavelength_nm": wavelength_nm,
+            "epsilon_background": str(epsilon_background),
+            "epsilon_substrate": str(epsilon_substrate),
+        }
+        _write_json(output / "theory_validation_summary.json", report)
+        return report
     wavelength_um = wavelength_nm / 1000.0
     alpha = sphere_polarizability(
         float(config["geometry"]["particle_radius_um"]),
         epsilon_particle,
         epsilon_background,
         wavelength_um=wavelength_um,
+        model="quasistatic",
     )
     direction, polarisation = _source_vectors(config)
     solution = solve_coupled_dipoles(
@@ -216,8 +269,7 @@ def _theory_check(config: Mapping[str, Any], experiment: Path, output: Path) -> 
         epsilon_background=epsilon_background,
         incident_direction=direction,
         incident_polarisation=polarisation,
-        epsilon_substrate=substrate_for_model,
-        surface_y_um=float(config["geometry"]["surface_y_um"]),
+        interaction_model="paper_retarded",
     )
     predicted = electric_field_from_dipoles(
         points,
@@ -225,8 +277,6 @@ def _theory_check(config: Mapping[str, Any], experiment: Path, output: Path) -> 
         epsilon_background=epsilon_background,
         incident_direction=direction,
         incident_polarisation=polarisation,
-        epsilon_substrate=substrate_for_model,
-        surface_y_um=float(config["geometry"]["surface_y_um"]),
     )
 
     # Equation 2 uses E0 as its scale. The observation line has constant y and
@@ -292,7 +342,12 @@ def _theory_check(config: Mapping[str, Any], experiment: Path, output: Path) -> 
 
     figure, axis = plt.subplots(figsize=(9.0, 5.6))
     axis.plot(points[:, 0], measured_amplitude, linewidth=2.0, label="MEEP")
-    axis.plot(points[:, 0], theory_amplitude, linewidth=1.7, label="Equation 2 CDA")
+    axis.plot(
+        points[:, 0],
+        theory_amplitude,
+        linewidth=1.7,
+        label="Equations 2-3 CDA",
+    )
     axis.set_xlabel("Position along particle line, x (µm)")
     axis.set_ylabel("Electric-field amplitude ratio")
     axis.set_title(f"External field amplitude at {wavelength_nm:.3f} nm")
@@ -304,10 +359,29 @@ def _theory_check(config: Mapping[str, Any], experiment: Path, output: Path) -> 
 
     report = {
         "status": "completed",
+        "benchmark": "formal_equation2_homogeneous",
+        "benchmark_status": "passed_preconditions",
+        "benchmark_requirements": benchmark_requirements,
         "wavelength_nm": wavelength_nm,
         "equation": "E_loc,i = E0 exp(i k.r_i) - sum_(j!=i) A_ij.P_j",
         "sign_convention": "A_ij = -G_ij, so -A_ij.P_j is the physical dipole field G_ij.P_j",
-        "model": "complex vector quasistatic coupled-dipole approximation",
+        "model": "paper Section-2 complex vector coupled-dipole approximation",
+        "paper_reference": {
+            "article": "Kravets et al., Chemical Reviews 2018, DOI 10.1021/acs.chemrev.8b00243",
+            "local_field": "Equation 2",
+            "interaction_tensor": "Equation 3 (retarded)",
+            "sphere_polarizability": "Equation 1, generalized to a homogeneous host",
+        },
+        "interaction_model": "paper_retarded",
+        "polarizability_model": "quasistatic",
+        "finite_size_corrections": "disabled for the strict Section-2.1 baseline",
+        "time_convention": (
+            "suppressed exp(-i omega t), inferred from the paper's outgoing exp(+i k r) factor"
+        ),
+        "units": (
+            "lengths in um; dipole moment stored as p_SI/epsilon_0; alpha in um^3; "
+            "host-medium 1/(4*pi*epsilon_background) factor included in A"
+        ),
         "normalization": {
             "meep": "complex field divided by one particle-free reference amplitude at this frequency",
             "theory": "complex field divided by E0 including the common incident phase on the probe line",
@@ -316,16 +390,11 @@ def _theory_check(config: Mapping[str, Any], experiment: Path, output: Path) -> 
         "same_scale_comparison": comparison.to_dict(),
         "maximum_equation2_residual": float(np.max(np.linalg.norm(residual, axis=1))),
         "substrate_treatment": (
-            "none; homogeneous background gives the direct Equation-2 validation"
-            if homogeneous_background
-            else "electrostatic image-dipole approximation; direct particle interactions match Equation 2"
+            "none; background and nominal substrate use the same material, so no optical interface exists"
         ),
         "important_limitation": (
-            "None for the normalization comparison; remaining differences test the quasistatic dipole model."
-            if homogeneous_background
-            else "The substrate reference includes the full MEEP interface response, whereas the current "
-            "analytical substrate term is an electrostatic image approximation. Validate the homogeneous "
-            "case first before interpreting substrate disagreement."
+            "The particle polarizability is the quasistatic Equation-1 value; radiation damping, "
+            "dynamic depolarization and higher multipoles are intentionally excluded."
         ),
     }
     _write_json(output / "theory_validation_summary.json", report)
