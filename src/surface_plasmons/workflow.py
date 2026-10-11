@@ -249,8 +249,9 @@ def _normalised_fields(
 
     Broadband Equation-2 comparisons use one complex particle-free reference
     amplitude per frequency. This cancels the pulse spectrum without dividing
-    by small pointwise numerical values. Full-volume maps can explicitly use
-    a pointwise intensity ratio instead.
+    by small pointwise numerical values. Full-volume maps use a pointwise
+    reference amplitude. Every returned enhancement is an E/E_reference
+    amplitude ratio, never its square.
     """
 
     if actual.fields.keys() != reference.fields.keys():
@@ -286,41 +287,42 @@ def _normalised_fields(
         for name, value in actual.fields.items():
             normalised = value / complex_reference
             result[f"normalised_{name}"] = normalised
-            result[f"{name}_contribution"] = np.abs(normalised) ** 2
-        intensity_enhancement = sum(
-            result[f"{name}_contribution"] for name in actual.fields
-        )
+            result[f"{name}_amplitude_ratio"] = np.abs(normalised)
+        amplitude_enhancement = np.sqrt(sum(
+            result[f"{name}_amplitude_ratio"] ** 2 for name in actual.fields
+        ))
         result["reference_complex_scale"] = np.broadcast_to(
             complex_reference, actual_intensity.shape
         )
-    elif mode == "pointwise_intensity_reference":
+    elif mode == "pointwise_amplitude_reference":
         safe_reference_intensity = np.where(
             reference_intensity > maximum_reference * 1e-12,
             reference_intensity,
             np.nan,
         )
+        safe_reference_amplitude = np.sqrt(safe_reference_intensity)
         reference_field = reference.fields[reference_component]
-        safe_reference_field = np.where(
-            np.abs(reference_field) ** 2 > maximum_reference * 1e-12,
-            reference_field,
+        reference_component_magnitude = np.abs(reference_field)
+        reference_phase = np.where(
+            reference_component_magnitude**2 > maximum_reference * 1e-12,
+            reference_field / reference_component_magnitude,
             np.nan + 1j * np.nan,
         )
+        safe_reference_field = reference_phase * safe_reference_amplitude
         for name, value in actual.fields.items():
             result[f"normalised_{name}"] = value / safe_reference_field
-            result[f"{name}_contribution"] = (
-                np.abs(value) ** 2 / safe_reference_intensity
+            result[f"{name}_amplitude_ratio"] = (
+                np.abs(value) / safe_reference_amplitude
             )
-        intensity_enhancement = actual_intensity / safe_reference_intensity
+        amplitude_enhancement = np.sqrt(actual_intensity) / safe_reference_amplitude
         result["reference_complex_scale"] = safe_reference_field
     else:
         raise WorkflowError(f"Unknown normalization mode {mode!r}.")
 
     result["actual_intensity"] = actual_intensity
     result["reference_intensity"] = reference_intensity
-    result["intensity_enhancement"] = intensity_enhancement
-    result["amplitude_enhancement"] = np.sqrt(intensity_enhancement)
-    # Backwards-compatible alias; it is now explicitly documented as intensity.
-    result["enhancement"] = intensity_enhancement
+    result["amplitude_enhancement"] = amplitude_enhancement
+    result["enhancement"] = amplitude_enhancement
     return result
 
 
@@ -430,9 +432,6 @@ def _save_broadband_results(
     x, y, z = _coordinate_grid(actual)
     rows: list[dict[str, Any]] = []
     response_rows: list[dict[str, Any]] = []
-    intensity_matrix = normalised["intensity_enhancement"].reshape(
-        len(actual.frequencies), -1
-    )
     amplitude_matrix = normalised["amplitude_enhancement"].reshape(
         len(actual.frequencies), -1
     )
@@ -444,14 +443,13 @@ def _save_broadband_results(
     reference_scale_flat = normalised["reference_complex_scale"].reshape(
         len(actual.frequencies), -1
     )
-    contributions = {
-        name: normalised[f"{name}_contribution"].reshape(len(actual.frequencies), -1)
+    component_amplitudes = {
+        name: normalised[f"{name}_amplitude_ratio"].reshape(len(actual.frequencies), -1)
         for name in actual.fields
     }
     for frequency_index, frequency in enumerate(actual.frequencies):
-        intensity = intensity_matrix[frequency_index]
         amplitude = amplitude_matrix[frequency_index]
-        finite = np.where(np.isfinite(intensity), intensity, np.nan)
+        finite = np.where(np.isfinite(amplitude), amplitude, np.nan)
         maximum_index = int(np.nanargmax(finite))
         response_rows.append(
             {
@@ -459,9 +457,7 @@ def _save_broadband_results(
                 "wavelength_nm": float(1000.0 / frequency),
                 "maximum_field_amplitude_enhancement": float(np.nanmax(amplitude)),
                 "mean_field_amplitude_enhancement": float(np.nanmean(amplitude)),
-                "maximum_field_intensity_enhancement": float(np.nanmax(finite)),
-                "mean_field_intensity_enhancement": float(np.nanmean(finite)),
-                "maximum_field_enhancement": float(np.nanmax(finite)),
+                "maximum_field_enhancement": float(np.nanmax(amplitude)),
                 "maximum_x_um": float(x[maximum_index]),
                 "maximum_y_um": float(y[maximum_index]),
                 "maximum_z_um": float(z[maximum_index]),
@@ -492,7 +488,6 @@ def _save_broadband_results(
                     "Ez_real": float(np.real(ez)),
                     "Ez_imag": float(np.imag(ez)),
                     "E_magnitude": float(np.sqrt(abs(ex) ** 2 + abs(ey) ** 2 + abs(ez) ** 2)),
-                    "E_intensity": float(abs(ex) ** 2 + abs(ey) ** 2 + abs(ez) ** 2),
                     "normalised_Ex_real": float(np.real(nex)),
                     "normalised_Ex_imag": float(np.imag(nex)),
                     "normalised_Ey_real": float(np.real(ney)),
@@ -501,12 +496,11 @@ def _save_broadband_results(
                     "normalised_Ez_imag": float(np.imag(nez)),
                     "reference_scale_real": float(np.real(reference_scale)),
                     "reference_scale_imag": float(np.imag(reference_scale)),
-                    "Ex_enhancement_contribution": float(contributions["Ex"][frequency_index, point_index]),
-                    "Ey_enhancement_contribution": float(contributions["Ey"][frequency_index, point_index]),
-                    "Ez_enhancement_contribution": float(contributions["Ez"][frequency_index, point_index]),
+                    "Ex_amplitude_ratio": float(component_amplitudes["Ex"][frequency_index, point_index]),
+                    "Ey_amplitude_ratio": float(component_amplitudes["Ey"][frequency_index, point_index]),
+                    "Ez_amplitude_ratio": float(component_amplitudes["Ez"][frequency_index, point_index]),
                     "field_amplitude_enhancement": float(amplitude[point_index]),
-                    "field_intensity_enhancement": float(intensity[point_index]),
-                    "total_field_enhancement": float(intensity[point_index]),
+                    "total_field_enhancement": float(amplitude[point_index]),
                     "normalization_mode": normalization_mode,
                 }
             )
@@ -516,14 +510,13 @@ def _save_broadband_results(
             "frequency_1_per_um", "wavelength_nm", "x_um", "y_um", "z_um",
             "abs_Ex", "abs_Ey", "abs_Ez",
             "Ex_real", "Ex_imag", "Ey_real", "Ey_imag", "Ez_real", "Ez_imag",
-            "E_magnitude", "E_intensity",
+            "E_magnitude",
             "normalised_Ex_real", "normalised_Ex_imag",
             "normalised_Ey_real", "normalised_Ey_imag",
             "normalised_Ez_real", "normalised_Ez_imag",
             "reference_scale_real", "reference_scale_imag",
-            "Ex_enhancement_contribution", "Ey_enhancement_contribution",
-            "Ez_enhancement_contribution", "field_amplitude_enhancement",
-            "field_intensity_enhancement", "total_field_enhancement",
+            "Ex_amplitude_ratio", "Ey_amplitude_ratio", "Ez_amplitude_ratio",
+            "field_amplitude_enhancement", "total_field_enhancement",
             "normalization_mode",
         ),
         rows,
@@ -533,26 +526,21 @@ def _save_broadband_results(
         (
             "frequency_1_per_um", "wavelength_nm",
             "maximum_field_amplitude_enhancement", "mean_field_amplitude_enhancement",
-            "maximum_field_intensity_enhancement", "mean_field_intensity_enhancement",
             "maximum_field_enhancement", "maximum_x_um", "maximum_y_um", "maximum_z_um",
         ),
         response_rows,
     )
     workspace.record_artifact("field_strength_vs_position_and_frequency", field_path)
     workspace.record_artifact("field_response_summary", response_path)
-    _save_broadband_plots(
-        project_config, actual, amplitude_matrix, intensity_matrix, x, workspace
-    )
+    _save_broadband_plots(project_config, actual, amplitude_matrix, x, workspace)
     _save_dielectric_table(project_config, actual.frequencies, workspace)
     return {
         "response_rows": response_rows,
         "amplitude_enhancement": amplitude_matrix,
-        "intensity_enhancement": intensity_matrix,
-        "enhancement": intensity_matrix,
+        "enhancement": amplitude_matrix,
         "x": x,
         "maximum_field_amplitude_enhancement": float(np.nanmax(amplitude_matrix)),
-        "maximum_field_intensity_enhancement": float(np.nanmax(intensity_matrix)),
-        "maximum_field_enhancement": float(np.nanmax(intensity_matrix)),
+        "maximum_field_enhancement": float(np.nanmax(amplitude_matrix)),
     }
 
 
@@ -560,7 +548,6 @@ def _save_broadband_plots(
     project_config: Mapping[str, Any],
     fields: StageFields,
     amplitude_enhancement: np.ndarray,
-    intensity_enhancement: np.ndarray,
     x: np.ndarray,
     workspace: ExperimentWorkspace,
 ) -> None:
@@ -571,9 +558,8 @@ def _save_broadband_plots(
     wavelengths = 1000.0 / fields.frequencies
     wavelength_order = np.argsort(wavelengths)
     x_order = np.argsort(x)
-    # The canonical position-frequency plot is the electric-field amplitude
-    # ratio requested for direct comparison with Equation 2. Keep the squared
-    # intensity ratio as a separately named diagnostic plot below.
+    # Equation 2 is an electric-field equation, so every research plot uses the
+    # field-amplitude ratio E/E_reference rather than its square.
     amplitude_matrix = amplitude_enhancement[wavelength_order][:, x_order]
     figure, axis = plt.subplots(figsize=(9.0, 5.7))
     image = axis.imshow(
@@ -586,31 +572,16 @@ def _save_broadband_plots(
     axis.set_xlabel("Position along particle line, x (µm)")
     axis.set_ylabel("Wavelength (nm)")
     axis.set_title("Electric-field amplitude enhancement versus position and wavelength")
-    figure.colorbar(image, ax=axis, label="Field-amplitude ratio, |E| / |E_reference|")
+    figure.colorbar(
+        image,
+        ax=axis,
+        label=r"Field-amplitude ratio, $|E|/|E_{\mathrm{ref}}|$",
+    )
     figure.tight_layout()
     heatmap_path = workspace.directory / "frequency_scan" / "field_position_frequency_heatmap.png"
     figure.savefig(heatmap_path, dpi=230, bbox_inches="tight")
     plt.close(figure)
     workspace.record_artifact("field_position_frequency_heatmap", heatmap_path)
-
-    intensity_matrix = intensity_enhancement[wavelength_order][:, x_order]
-    figure, axis = plt.subplots(figsize=(9.0, 5.7))
-    image = axis.imshow(
-        intensity_matrix,
-        origin="lower",
-        aspect="auto",
-        extent=[float(x[x_order][0]), float(x[x_order][-1]), float(wavelengths[wavelength_order][0]), float(wavelengths[wavelength_order][-1])],
-        cmap="inferno",
-    )
-    axis.set_xlabel("Position along particle line, x (µm)")
-    axis.set_ylabel("Wavelength (nm)")
-    axis.set_title("Electric-field intensity enhancement versus position and wavelength")
-    figure.colorbar(image, ax=axis, label="Intensity ratio, |E|² / |E_reference|²")
-    figure.tight_layout()
-    intensity_path = workspace.directory / "frequency_scan" / "field_intensity_position_frequency_heatmap.png"
-    figure.savefig(intensity_path, dpi=230, bbox_inches="tight")
-    plt.close(figure)
-    workspace.record_artifact("field_intensity_position_frequency_heatmap", intensity_path)
 
     parameters = {
         **geometry_parameters(project_config, include_particles=True),
@@ -627,7 +598,7 @@ def _save_broadband_plots(
             label=f"Above particle {item.particle_index}",
         )
     axis.set_xlabel("Wavelength (nm)")
-    axis.set_ylabel("Amplitude enhancement, |E| / |E_reference|")
+    axis.set_ylabel(r"Field-amplitude ratio, $|E|/|E_{\mathrm{ref}}|$")
     axis.set_title("External field response sampled above each particle")
     axis.grid(alpha=0.22)
     axis.legend(ncol=3, fontsize=8, frameon=False)
@@ -652,8 +623,8 @@ def _select_wavelengths(
             response = np.asarray(
                 [
                     float(
-                        row["maximum_field_intensity_enhancement"]
-                        if "maximum_field_intensity_enhancement" in row
+                        row["maximum_field_amplitude_enhancement"]
+                        if "maximum_field_amplitude_enhancement" in row
                         else row["maximum_field_enhancement"]
                     )
                     for row in response_rows
@@ -703,7 +674,7 @@ def _save_field_map(
         actual,
         reference,
         reference_component=str(project_config["source"]["polarisation"]),
-        mode="pointwise_intensity_reference",
+        mode="pointwise_amplitude_reference",
     )
     folder = workspace.directory / "field_maps" / f"{wavelength_nm:.3f}nm"
     # ``exist_ok`` supports an explicit --resume after interruption during
@@ -711,10 +682,8 @@ def _save_field_map(
     folder.mkdir(parents=True, exist_ok=True)
     for component, values in actual.fields.items():
         np.save(folder / f"field_{component}.npy", values[0])
-    intensity_enhancement = normalised["intensity_enhancement"][0]
     amplitude_enhancement = normalised["amplitude_enhancement"][0]
-    np.save(folder / "field_total_enhancement.npy", intensity_enhancement)
-    np.save(folder / "field_intensity_enhancement.npy", intensity_enhancement)
+    np.save(folder / "field_total_enhancement.npy", amplitude_enhancement)
     np.save(folder / "field_amplitude_enhancement.npy", amplitude_enhancement)
     np.savez(folder / "coordinates.npz", **actual.coordinates)
 
@@ -729,9 +698,9 @@ def _save_field_map(
     }
     images: dict[str, str] = {}
     for plane_name, (horizontal, vertical, fixed) in plane_axes.items():
-        total_plane, fixed_index = _plane(intensity_enhancement, plane_name)
+        total_plane, fixed_index = _plane(amplitude_enhancement, plane_name)
         component_planes = {
-            name: _plane(normalised[f"{name}_contribution"][0], plane_name)[0]
+            name: _plane(normalised[f"{name}_amplitude_ratio"][0], plane_name)[0]
             for name in ("Ex", "Ey", "Ez")
         }
         h = actual.coordinates[horizontal]
@@ -742,13 +711,18 @@ def _save_field_map(
         image = None
         for axis, (label, data) in zip(
             axes.ravel(),
-            [("Ex", component_planes["Ex"]), ("Ey", component_planes["Ey"]), ("Ez", component_planes["Ez"]), ("Total |E|²", total_plane)],
+            [("|Ex|", component_planes["Ex"]), ("|Ey|", component_planes["Ey"]), ("|Ez|", component_planes["Ez"]), ("Total |E|", total_plane)],
         ):
-            image = axis.imshow(data.T, origin="lower", extent=extent, aspect="equal", cmap="inferno", vmin=0.0, vmax=max(colour_max, 1e-30))
+            image = axis.imshow(data.T, origin="lower", extent=extent, aspect="equal", cmap="viridis", vmin=0.0, vmax=max(colour_max, 1e-30))
             axis.set_title(label)
             axis.set_xlabel(f"{horizontal} (µm)")
             axis.set_ylabel(f"{vertical} (µm)")
-        figure.colorbar(image, ax=axes.ravel().tolist(), label="Contribution to |E|² / |E_reference|²", shrink=0.85)
+        figure.colorbar(
+            image,
+            ax=axes.ravel().tolist(),
+            label=r"Field-amplitude ratio, $|E_{\mathrm{component}}|/|E_{\mathrm{ref}}|$",
+            shrink=0.85,
+        )
         fixed_value = float(actual.coordinates[fixed][fixed_index])
         figure.suptitle(f"{wavelength_nm:.3f} nm — {plane_name} plane ({fixed}={fixed_value:.4g} µm)")
         path = folder / f"field_components_{plane_name}.png"
@@ -773,7 +747,7 @@ def _save_field_map(
         figure.colorbar(
             amplitude_image,
             ax=axis,
-            label="Amplitude enhancement, |E| / |E_reference|",
+            label=r"Field-amplitude ratio, $|E|/|E_{\mathrm{ref}}|$",
         )
         amplitude_path = folder / f"field_amplitude_{plane_name}.png"
         figure.savefig(amplitude_path, dpi=240, bbox_inches="tight")
@@ -782,7 +756,7 @@ def _save_field_map(
             amplitude_path.relative_to(workspace.directory)
         )
     maximum_index = np.unravel_index(
-        int(np.nanargmax(intensity_enhancement)), intensity_enhancement.shape
+        int(np.nanargmax(amplitude_enhancement)), amplitude_enhancement.shape
     )
     maximum_location = {
         axis: float(actual.coordinates[axis][maximum_index[index]])
@@ -791,14 +765,10 @@ def _save_field_map(
     manifest = {
         "wavelength_nm": wavelength_nm,
         "maximum_field_amplitude_enhancement": float(np.nanmax(amplitude_enhancement)),
-        "maximum_field_intensity_enhancement": float(np.nanmax(intensity_enhancement)),
-        "maximum_field_enhancement": float(np.nanmax(intensity_enhancement)),
+        "maximum_field_enhancement": float(np.nanmax(amplitude_enhancement)),
         "maximum_location_um": maximum_location,
-        "normalization": "pointwise particle-free total electric-field intensity",
-        "scale_definitions": {
-            "amplitude": "|E| / |E_reference|",
-            "intensity": "|E|^2 / |E_reference|^2"
-        },
+        "normalization": "pointwise particle-free electric-field amplitude",
+        "scale_definition": "|E| / |E_reference|",
         "components": ["Ex", "Ey", "Ez"],
         "images": images,
     }
@@ -935,10 +905,7 @@ def run_project(
                 "maximum_broadband_field_amplitude_enhancement": broadband[
                     "maximum_field_amplitude_enhancement"
                 ],
-                "maximum_broadband_field_intensity_enhancement": broadband[
-                    "maximum_field_intensity_enhancement"
-                ],
-                # Backwards-compatible alias; this value is intensity enhancement.
+                # Backwards-compatible alias; this value is now amplitude enhancement.
                 "maximum_broadband_field_enhancement": broadband["maximum_field_enhancement"],
                 "field_map_wavelengths_nm": json.dumps(wavelengths_nm),
             }

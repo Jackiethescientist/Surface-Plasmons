@@ -272,7 +272,7 @@ def analyze_field(
     component: str = "field",
     incident_amplitude: float = 1.0,
 ) -> FieldAnalysis:
-    """Analyse a complex field array and calculate |E|² enhancement."""
+    """Analyse a complex field array and calculate |E|/|E0| enhancement."""
 
     if not isinstance(incident_amplitude, (int, float)) or incident_amplitude <= 0:
         raise AnalysisError("incident_amplitude must be positive.")
@@ -282,7 +282,6 @@ def analyze_field(
     if finite.size == 0:
         raise AnalysisError("The field contains no finite values.")
     intensity = finite**2
-    incident_intensity = float(incident_amplitude) ** 2
     return FieldAnalysis(
         component=component,
         shape=tuple(int(value) for value in array.shape),
@@ -293,8 +292,8 @@ def analyze_field(
         intensity_max=float(np.max(intensity)),
         intensity_mean=float(np.mean(intensity)),
         intensity_percentile_95=float(np.percentile(intensity, 95)),
-        maximum_enhancement=float(np.max(intensity) / incident_intensity),
-        mean_enhancement=float(np.mean(intensity) / incident_intensity),
+        maximum_enhancement=float(np.max(finite) / float(incident_amplitude)),
+        mean_enhancement=float(np.mean(finite) / float(incident_amplitude)),
     )
 
 

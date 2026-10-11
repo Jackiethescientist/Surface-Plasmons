@@ -50,7 +50,6 @@ class FieldComparison:
     sample_count: int
     complex_nrmse: float
     amplitude_nrmse: float
-    intensity_nrmse: float
     amplitude_correlation: float | None
     mean_phase_error_rad: float | None
     maximum_index_simulation: int
@@ -61,7 +60,6 @@ class FieldComparison:
             "sample_count": self.sample_count,
             "complex_nrmse": self.complex_nrmse,
             "amplitude_nrmse": self.amplitude_nrmse,
-            "intensity_nrmse": self.intensity_nrmse,
             "amplitude_correlation": self.amplitude_correlation,
             "mean_phase_error_rad": self.mean_phase_error_rad,
             "maximum_index_simulation": self.maximum_index_simulation,
@@ -413,12 +411,6 @@ def compare_complex_fields(
     amplitude_nrmse = float(
         np.sqrt(np.mean((measured_amplitude - predicted_amplitude) ** 2)) / amplitude_scale
     )
-    measured_intensity = measured_amplitude**2
-    predicted_intensity = predicted_amplitude**2
-    intensity_scale = float(np.sqrt(np.mean(measured_intensity**2))) or 1.0
-    intensity_nrmse = float(
-        np.sqrt(np.mean((measured_intensity - predicted_intensity) ** 2)) / intensity_scale
-    )
     if measured.size > 1 and np.std(measured_amplitude) > 0 and np.std(predicted_amplitude) > 0:
         correlation = float(np.corrcoef(measured_amplitude, predicted_amplitude)[0, 1])
     else:
@@ -434,13 +426,12 @@ def compare_complex_fields(
         measured_point_intensity = np.sum(np.abs(measured_original) ** 2, axis=-1).reshape(-1)
         predicted_point_intensity = np.sum(np.abs(predicted_original) ** 2, axis=-1).reshape(-1)
     else:
-        measured_point_intensity = measured_intensity
-        predicted_point_intensity = predicted_intensity
+        measured_point_intensity = measured_amplitude**2
+        predicted_point_intensity = predicted_amplitude**2
     return FieldComparison(
         sample_count=int(measured.size),
         complex_nrmse=complex_nrmse,
         amplitude_nrmse=amplitude_nrmse,
-        intensity_nrmse=intensity_nrmse,
         amplitude_correlation=correlation,
         mean_phase_error_rad=mean_phase_error,
         maximum_index_simulation=int(np.argmax(measured_point_intensity)),

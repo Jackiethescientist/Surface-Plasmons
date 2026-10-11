@@ -93,7 +93,7 @@ BASE_CONFIG: dict[str, Any] = {
         # Fields are saved only in the higher-resolution resonance stage.
         "save_fields": False,
         "save_images": False,
-        # Save all electric components for total |E|^2 field enhancement.
+        # Save all electric components for total |E|/|E0| field enhancement.
         "field_components": ["Ex", "Ey", "Ez"],
     },
     "notes": "",
@@ -205,7 +205,7 @@ DEFAULT_WORKERS = 1  # MEEP is memory intensive; start with one worker.
 PLOT_RESULTS = {
     "resonance_wavelength_um": "Resonance wavelength (µm)",
     "peak_spectral_response": "Peak spectral response",
-    "electric_field_enhancement": "Electric-field intensity enhancement, |E|² / |E₀|²",
+    "electric_field_enhancement": "Electric-field amplitude enhancement, |E| / |E₀|",
     "resonance_linewidth_fwhm_um": "Resonance linewidth / FWHM (µm)",
     "quality_factor": "Quality factor Q",
     "peak_absorption": "Peak absorption",

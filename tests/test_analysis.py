@@ -40,7 +40,7 @@ def test_field_and_energy_balance_statistics() -> None:
     report = analyze_field(field, incident_amplitude=1.0)
 
     assert report.shape == (2, 2)
-    assert report.maximum_enhancement == pytest.approx(4.0)
+    assert report.maximum_enhancement == pytest.approx(2.0)
 
     balance = check_energy_balance(
         reflectance=[0.2, 0.3],

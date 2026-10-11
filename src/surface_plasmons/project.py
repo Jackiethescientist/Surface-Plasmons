@@ -175,11 +175,11 @@ def normalise_project_config(
             "measurement.probe_offset_from_particle_surface_um cannot be negative."
         )
     if measurement["normalization_mode"] not in {
-        "global_complex_reference", "pointwise_intensity_reference"
+        "global_complex_reference", "pointwise_amplitude_reference"
     }:
         raise ProjectConfigError(
             "measurement.normalization_mode must be global_complex_reference or "
-            "pointwise_intensity_reference."
+            "pointwise_amplitude_reference."
         )
     return result
 

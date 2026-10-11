@@ -331,7 +331,7 @@ def _central_plane(array: np.ndarray) -> np.ndarray:
 
 
 def field_research_outputs(result: Mapping[str, Any] | Any) -> tuple[float | None, str, list[str]]:
-    """Calculate total electric |E|^2 enhancement and save its spatial map."""
+    """Calculate total electric-field amplitude enhancement and save its map."""
 
     artifacts = _get(result, "artifacts", {}) or {}
     config = _get(result, "config", {}) or {}
@@ -352,10 +352,10 @@ def field_research_outputs(result: Mapping[str, Any] | Any) -> tuple[float | Non
     if len({array.shape for array in arrays}) != 1:
         return None, "", ["Electric-field component arrays had different shapes."]
 
-    intensity = sum(np.abs(array) ** 2 for array in arrays)
+    field_magnitude = np.sqrt(sum(np.abs(array) ** 2 for array in arrays))
     source = config.get("source", {}) or {}
     incident_amplitude = float(source.get("amplitude", 1.0))
-    enhancement = intensity / (incident_amplitude**2)
+    enhancement = field_magnitude / abs(incident_amplitude)
     finite = enhancement[np.isfinite(enhancement)]
     maximum = float(np.max(finite)) if finite.size else None
     if not output_directory:
@@ -377,8 +377,8 @@ def field_research_outputs(result: Mapping[str, Any] | Any) -> tuple[float | Non
         )
         axis.set_xlabel("x grid index")
         axis.set_ylabel("y grid index")
-        axis.set_title("Electric-field enhancement |E|² / |E₀|²")
-        figure.colorbar(image, ax=axis, label="Intensity enhancement, |E|² / |E₀|²")
+        axis.set_title("Electric-field amplitude enhancement |E| / |E₀|")
+        figure.colorbar(image, ax=axis, label=r"Field-amplitude ratio, $|E|/|E_0|$")
         figure.tight_layout()
         figure.savefig(destination, dpi=220, bbox_inches="tight")
         plt.close(figure)
@@ -1060,7 +1060,7 @@ def create_resonance_field_maps(
     *,
     relative_bandwidth: float,
 ) -> dict[str, Any]:
-    """Save Ex/Ey/Ez contributions and total field enhancement on three planes."""
+    """Save Ex/Ey/Ez and total E/E-reference amplitude maps on three planes."""
 
     actual = _load_saved_fields(result)
     if set(reference_fields) != {"Ex", "Ey", "Ez"}:
@@ -1068,16 +1068,24 @@ def create_resonance_field_maps(
     if any(reference_fields[name].shape != actual[name].shape for name in actual):
         raise ValueError("Reference and particle field arrays have different shapes.")
 
-    incident_intensity = sum(np.abs(reference_fields[name]) ** 2 for name in actual)
-    incident_max = float(np.nanmax(incident_intensity))
+    incident_amplitude = np.sqrt(
+        sum(np.abs(reference_fields[name]) ** 2 for name in actual)
+    )
+    incident_max = float(np.nanmax(incident_amplitude))
     if not math.isfinite(incident_max) or incident_max <= 0:
-        raise ValueError("The empty-cell incident field intensity is zero or invalid.")
-    safe_incident = np.where(incident_intensity > incident_max * 1e-12, incident_intensity, np.nan)
+        raise ValueError("The empty-cell incident field amplitude is zero or invalid.")
+    safe_incident = np.where(
+        incident_amplitude > incident_max * 1e-12,
+        incident_amplitude,
+        np.nan,
+    )
     contributions = {
-        name: np.abs(array) ** 2 / safe_incident
+        name: np.abs(array) / safe_incident
         for name, array in actual.items()
     }
-    total_enhancement = sum(contributions.values())
+    total_enhancement = np.sqrt(
+        sum(values**2 for values in contributions.values())
+    )
     finite = total_enhancement[np.isfinite(total_enhancement)]
     maximum = float(np.max(finite)) if finite.size else None
 
@@ -1119,10 +1127,10 @@ def create_resonance_field_maps(
         fixed_value = float(coordinates[fixed][fixed_index])
         figure, axes = plt.subplots(2, 2, figsize=(10.5, 8.6), constrained_layout=True)
         panels = [
-            ("Ex", component_planes["Ex"]),
-            ("Ey", component_planes["Ey"]),
-            ("Ez", component_planes["Ez"]),
-            ("Total |E|²", total_plane),
+            ("|Ex|", component_planes["Ex"]),
+            ("|Ey|", component_planes["Ey"]),
+            ("|Ez|", component_planes["Ez"]),
+            ("Total |E|", total_plane),
         ]
         image = None
         for axis, (label, values) in zip(axes.ravel(), panels):
@@ -1131,7 +1139,7 @@ def create_resonance_field_maps(
                 origin="lower",
                 extent=extent,
                 aspect="equal",
-                cmap="inferno",
+                cmap="viridis",
                 vmin=0.0,
                 vmax=colour_max,
             )
@@ -1142,7 +1150,7 @@ def create_resonance_field_maps(
             figure.colorbar(
                 image,
                 ax=axes.ravel().tolist(),
-                label="Contribution to |E|² / |E₀|²",
+                label=r"Field-amplitude ratio, $|E_{\mathrm{component}}|/|E_0|$",
                 shrink=0.86,
             )
         figure.suptitle(
@@ -1165,7 +1173,7 @@ def create_resonance_field_maps(
         "planes": plane_images,
         "total_field_enhancement_array": str(array_path),
         "maximum_field_enhancement": maximum,
-        "normalization": "pointwise empty-cell total electric-field intensity",
+        "normalization": "pointwise empty-cell electric-field amplitude",
     }
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return {**manifest, "manifest": str(manifest_path)}

@@ -18,8 +18,8 @@ def test_equation2_validation_keeps_common_scale_and_labels_axes(tmp_path) -> No
     output = tmp_path / "validation"
     _write_csv(
         scan / "field_response_summary.csv",
-        ["wavelength_nm", "maximum_field_intensity_enhancement", "maximum_field_enhancement"],
-        [{"wavelength_nm": 600.0, "maximum_field_intensity_enhancement": 1.0, "maximum_field_enhancement": 1.0}],
+        ["wavelength_nm", "maximum_field_amplitude_enhancement", "maximum_field_enhancement"],
+        [{"wavelength_nm": 600.0, "maximum_field_amplitude_enhancement": 1.0, "maximum_field_enhancement": 1.0}],
     )
     columns = [
         "wavelength_nm", "x_um", "y_um", "z_um",
@@ -67,4 +67,4 @@ def test_equation2_validation_keeps_common_scale_and_labels_axes(tmp_path) -> No
     assert report["normalization"]["independent_curve_rescaling"] is False
     assert report["maximum_equation2_residual"] < 1e-12
     assert (output / "equation2_field_amplitude_profile.png").is_file()
-    assert (output / "equation2_field_intensity_profile.png").is_file()
+    assert not (output / "equation2_field_intensity_profile.png").exists()

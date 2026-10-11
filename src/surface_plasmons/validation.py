@@ -151,8 +151,8 @@ def _theory_check(config: Mapping[str, Any], experiment: Path, output: Path) -> 
     strongest = max(
         response_rows,
         key=lambda row: float(
-            row["maximum_field_intensity_enhancement"]
-            if "maximum_field_intensity_enhancement" in row
+            row["maximum_field_amplitude_enhancement"]
+            if "maximum_field_amplitude_enhancement" in row
             else row["maximum_field_enhancement"]
         ),
     )
@@ -244,8 +244,6 @@ def _theory_check(config: Mapping[str, Any], experiment: Path, output: Path) -> 
 
     measured_amplitude = np.sqrt(np.sum(np.abs(measured) ** 2, axis=1))
     theory_amplitude = np.sqrt(np.sum(np.abs(predicted_normalised) ** 2, axis=1))
-    measured_intensity = measured_amplitude**2
-    theory_intensity = theory_amplitude**2
     rows: list[dict[str, Any]] = []
     for index, point in enumerate(points):
         row: dict[str, Any] = {
@@ -256,8 +254,6 @@ def _theory_check(config: Mapping[str, Any], experiment: Path, output: Path) -> 
             "z_um": float(point[2]),
             "meep_amplitude_E_over_Eref": float(measured_amplitude[index]),
             "equation2_amplitude_E_over_E0": float(theory_amplitude[index]),
-            "meep_intensity_ratio": float(measured_intensity[index]),
-            "equation2_intensity_ratio": float(theory_intensity[index]),
         }
         for component_index_value, component in enumerate(("Ex", "Ey", "Ez")):
             row[f"meep_{component}_real"] = float(np.real(measured[index, component_index_value]))
@@ -306,18 +302,6 @@ def _theory_check(config: Mapping[str, Any], experiment: Path, output: Path) -> 
     figure.savefig(output / "equation2_field_amplitude_profile.png", dpi=230, bbox_inches="tight")
     plt.close(figure)
 
-    figure, axis = plt.subplots(figsize=(9.0, 5.6))
-    axis.plot(points[:, 0], measured_intensity, linewidth=2.0, label="MEEP")
-    axis.plot(points[:, 0], theory_intensity, linewidth=1.7, label="Equation 2 CDA")
-    axis.set_xlabel("Position along particle line, x (µm)")
-    axis.set_ylabel("Electric-field intensity ratio")
-    axis.set_title(f"External field intensity at {wavelength_nm:.3f} nm")
-    axis.grid(alpha=0.22)
-    axis.legend(frameon=False)
-    figure.tight_layout()
-    figure.savefig(output / "equation2_field_intensity_profile.png", dpi=230, bbox_inches="tight")
-    plt.close(figure)
-
     report = {
         "status": "completed",
         "wavelength_nm": wavelength_nm,
@@ -356,7 +340,7 @@ def _response_from_fields(
         reference,
         reference_component=str(config["source"]["polarisation"]),
         mode=str(config["measurement"]["normalization_mode"]),
-    )["intensity_enhancement"]
+    )["amplitude_enhancement"]
     return np.nanmax(enhancement.reshape(enhancement.shape[0], -1), axis=1)
 
 
