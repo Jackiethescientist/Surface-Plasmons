@@ -1,7 +1,13 @@
 import csv
 
+import pytest
+
 from surface_plasmons.project import normalise_project_config
-from surface_plasmons.validation import _hierarchy_check, _theory_check
+from surface_plasmons.validation import (
+    _comparison_summary_markdown,
+    _hierarchy_check,
+    _theory_check,
+)
 
 
 def _write_csv(path, fieldnames, rows):
@@ -66,6 +72,15 @@ def test_equation2_validation_keeps_common_scale_and_labels_axes(tmp_path) -> No
     assert report["status"] == "completed"
     assert report["benchmark"] == "formal_equation2_homogeneous"
     assert report["benchmark_status"] == "passed_preconditions"
+    assert report["execution_status"] == "completed"
+    assert report["applicability_status"] == "passed"
+    assert report["agreement_status"] in {
+        "passed_quantitative",
+        "passed_qualitative_only",
+        "failed",
+    }
+    assert report["same_scale_total_field_comparison"]["spatial_sample_count"] == 5
+    assert "same_scale_scattered_field_comparison" in report
     assert report["interaction_model"] == "paper_retarded"
     assert report["polarizability_model"] == "quasistatic"
     assert report["finite_size_corrections"] == (
@@ -73,7 +88,9 @@ def test_equation2_validation_keeps_common_scale_and_labels_axes(tmp_path) -> No
     )
     assert report["normalization"]["independent_curve_rescaling"] is False
     assert report["maximum_equation2_residual"] < 1e-12
+    assert report["relative_equation2_residual"] < 1e-12
     assert (output / "equation2_field_amplitude_profile.png").is_file()
+    assert (output / "equation2_scattered_field_amplitude_profile.png").is_file()
     assert not (output / "equation2_field_intensity_profile.png").exists()
 
     hierarchy = _hierarchy_check(config, experiment, output)
@@ -86,6 +103,23 @@ def test_equation2_validation_keeps_common_scale_and_labels_axes(tmp_path) -> No
     assert hierarchy["maximum_scalar_vs_vector_relative_error"] < 1e-12
     assert (output / "model_hierarchy_comparison.png").is_file()
     assert (output / "one_dimensional_defect_response.png").is_file()
+    assert (output / "fixed_probe_and_rms_spectrum_comparison.png").is_file()
+    with (output / "model_hierarchy_spectrum.csv").open(
+        newline="", encoding="utf-8-sig"
+    ) as handle:
+        hierarchy_row = next(csv.DictReader(handle))
+    assert float(hierarchy_row["particle_radius_um"]) == pytest.approx(
+        config["geometry"]["particle_radius_um"]
+    )
+    assert float(hierarchy_row["epsilon_particle_real"]) == pytest.approx(-10.0)
+    assert "alpha_equation1_real_um3" in hierarchy_row
+    assert "alpha_radiation_reaction_real_um3" in hierarchy_row
+    assert "alpha_mie_a1_real_um3" in hierarchy_row
+    assert "mie_a1_real" in hierarchy_row
+    assert "meep_central_probe_E_over_Eref" in hierarchy_row
+    assert "meep_rms_external_E_over_Eref" in hierarchy_row
+    assert hierarchy["numerical_convergence_status"] == "not_run_by_hierarchy_check"
+    assert "fixed_central_probe_comparisons" in hierarchy
 
 
 def test_formal_equation2_benchmark_rejects_substrate_interface(tmp_path) -> None:
@@ -108,3 +142,63 @@ def test_formal_equation2_benchmark_rejects_substrate_interface(tmp_path) -> Non
     assert report["benchmark_status"] == "failed_precondition"
     assert "no substrate interface" in report["reason"]
     assert not (output / "equation2_field_amplitude_profile.png").exists()
+
+
+def test_comparison_summary_is_plain_language_and_uses_percent_errors() -> None:
+    config = normalise_project_config({"simulation_name": "summary-test"})
+    spectrum_metrics = {
+        "same_scale_nrmse": 0.125,
+        "correlation": 0.81,
+        "relative_peak_wavelength_error": 0.03,
+        "model_peak_at_scan_boundary": False,
+        "agreement_status": "passed_qualitative_only",
+    }
+    reports = {
+        "configuration": {
+            "status": "passed",
+            "numerical_sampling": {
+                "cells_across_particle": 16.0,
+                "cells_across_probe_offset": 4.0,
+                "warnings": [],
+            },
+        },
+        "theory": {
+            "status": "completed",
+            "wavelength_nm": 600.0,
+            "agreement_status": "passed_quantitative",
+            "scattered_field_agreement_status": "failed",
+            "same_scale_total_field_comparison": {
+                "amplitude_nrmse": 0.075,
+                "amplitude_correlation": 0.95,
+            },
+            "same_scale_scattered_field_comparison": {
+                "amplitude_nrmse": 0.25,
+                "amplitude_correlation": 0.20,
+            },
+            "relative_equation2_residual": 2e-16,
+        },
+        "hierarchy": {
+            "status": "completed",
+            "maximum_scalar_vs_vector_relative_error": 1e-15,
+            "same_observable_external_field_comparisons": {
+                "quasistatic_cda_vs_meep": spectrum_metrics,
+            },
+            "fixed_central_probe_comparisons": {},
+            "rms_probe_line_comparisons": {},
+            "equation4_dipole_sum": "reported for the undefected equal-spacing chain",
+        },
+    }
+
+    summary = _comparison_summary_markdown(config, reports)
+
+    assert "# Comparison summary" in summary
+    assert "`summary-test`" in summary
+    assert "7.50%" in summary
+    assert "25.00%" in summary
+    assert "12.50%" in summary
+    assert "3.00%" in summary
+    assert "E/E_ref" in summary
+    assert "not squared intensities" in summary
+    assert "Exact multipole Mie theory" in summary
+    assert "Not directly comparable" in summary
+    assert "Resolution convergence" in summary

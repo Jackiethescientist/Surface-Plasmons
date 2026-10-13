@@ -287,6 +287,12 @@ def _normalised_fields(
         for name, value in actual.fields.items():
             normalised = value / complex_reference
             result[f"normalised_{name}"] = normalised
+            result[f"normalised_reference_{name}"] = (
+                reference.fields[name] / complex_reference
+            )
+            result[f"normalised_scattered_{name}"] = (
+                normalised - result[f"normalised_reference_{name}"]
+            )
             result[f"{name}_amplitude_ratio"] = np.abs(normalised)
         amplitude_enhancement = np.sqrt(sum(
             result[f"{name}_amplitude_ratio"] ** 2 for name in actual.fields
@@ -311,6 +317,13 @@ def _normalised_fields(
         safe_reference_field = reference_phase * safe_reference_amplitude
         for name, value in actual.fields.items():
             result[f"normalised_{name}"] = value / safe_reference_field
+            result[f"normalised_reference_{name}"] = (
+                reference.fields[name] / safe_reference_field
+            )
+            result[f"normalised_scattered_{name}"] = (
+                result[f"normalised_{name}"]
+                - result[f"normalised_reference_{name}"]
+            )
             result[f"{name}_amplitude_ratio"] = (
                 np.abs(value) / safe_reference_amplitude
             )
@@ -322,6 +335,12 @@ def _normalised_fields(
     result["actual_intensity"] = actual_intensity
     result["reference_intensity"] = reference_intensity
     result["amplitude_enhancement"] = amplitude_enhancement
+    result["scattered_amplitude_enhancement"] = np.sqrt(
+        sum(
+            np.abs(result[f"normalised_scattered_{name}"]) ** 2
+            for name in actual.fields
+        )
+    )
     result["enhancement"] = amplitude_enhancement
     return result
 
@@ -440,6 +459,21 @@ def _save_broadband_results(
         name: normalised[f"normalised_{name}"].reshape(len(actual.frequencies), -1)
         for name in actual.fields
     }
+    normalised_reference_flat = {
+        name: normalised[f"normalised_reference_{name}"].reshape(
+            len(actual.frequencies), -1
+        )
+        for name in actual.fields
+    }
+    normalised_scattered_flat = {
+        name: normalised[f"normalised_scattered_{name}"].reshape(
+            len(actual.frequencies), -1
+        )
+        for name in actual.fields
+    }
+    scattered_amplitude_matrix = normalised[
+        "scattered_amplitude_enhancement"
+    ].reshape(len(actual.frequencies), -1)
     reference_scale_flat = normalised["reference_complex_scale"].reshape(
         len(actual.frequencies), -1
     )
@@ -457,6 +491,12 @@ def _save_broadband_results(
                 "wavelength_nm": float(1000.0 / frequency),
                 "maximum_field_amplitude_enhancement": float(np.nanmax(amplitude)),
                 "mean_field_amplitude_enhancement": float(np.nanmean(amplitude)),
+                "maximum_scattered_field_amplitude_ratio": float(
+                    np.nanmax(scattered_amplitude_matrix[frequency_index])
+                ),
+                "mean_scattered_field_amplitude_ratio": float(
+                    np.nanmean(scattered_amplitude_matrix[frequency_index])
+                ),
                 "maximum_field_enhancement": float(np.nanmax(amplitude)),
                 "maximum_x_um": float(x[maximum_index]),
                 "maximum_y_um": float(y[maximum_index]),
@@ -471,6 +511,14 @@ def _save_broadband_results(
             ney = normalised_flat["Ey"][frequency_index, point_index]
             nez = normalised_flat["Ez"][frequency_index, point_index]
             reference_scale = reference_scale_flat[frequency_index, point_index]
+            normalised_reference_values = {
+                name: normalised_reference_flat[name][frequency_index, point_index]
+                for name in ("Ex", "Ey", "Ez")
+            }
+            normalised_scattered_values = {
+                name: normalised_scattered_flat[name][frequency_index, point_index]
+                for name in ("Ex", "Ey", "Ez")
+            }
             rows.append(
                 {
                     "frequency_1_per_um": float(frequency),
@@ -494,12 +542,29 @@ def _save_broadband_results(
                     "normalised_Ey_imag": float(np.imag(ney)),
                     "normalised_Ez_real": float(np.real(nez)),
                     "normalised_Ez_imag": float(np.imag(nez)),
+                    **{
+                        f"normalised_reference_{name}_{part}": float(
+                            getattr(normalised_reference_values[name], part)
+                        )
+                        for name in ("Ex", "Ey", "Ez")
+                        for part in ("real", "imag")
+                    },
+                    **{
+                        f"normalised_scattered_{name}_{part}": float(
+                            getattr(normalised_scattered_values[name], part)
+                        )
+                        for name in ("Ex", "Ey", "Ez")
+                        for part in ("real", "imag")
+                    },
                     "reference_scale_real": float(np.real(reference_scale)),
                     "reference_scale_imag": float(np.imag(reference_scale)),
                     "Ex_amplitude_ratio": float(component_amplitudes["Ex"][frequency_index, point_index]),
                     "Ey_amplitude_ratio": float(component_amplitudes["Ey"][frequency_index, point_index]),
                     "Ez_amplitude_ratio": float(component_amplitudes["Ez"][frequency_index, point_index]),
                     "field_amplitude_enhancement": float(amplitude[point_index]),
+                    "scattered_field_amplitude_ratio": float(
+                        scattered_amplitude_matrix[frequency_index, point_index]
+                    ),
                     "total_field_enhancement": float(amplitude[point_index]),
                     "normalization_mode": normalization_mode,
                 }
@@ -514,9 +579,16 @@ def _save_broadband_results(
             "normalised_Ex_real", "normalised_Ex_imag",
             "normalised_Ey_real", "normalised_Ey_imag",
             "normalised_Ez_real", "normalised_Ez_imag",
+            "normalised_reference_Ex_real", "normalised_reference_Ex_imag",
+            "normalised_reference_Ey_real", "normalised_reference_Ey_imag",
+            "normalised_reference_Ez_real", "normalised_reference_Ez_imag",
+            "normalised_scattered_Ex_real", "normalised_scattered_Ex_imag",
+            "normalised_scattered_Ey_real", "normalised_scattered_Ey_imag",
+            "normalised_scattered_Ez_real", "normalised_scattered_Ez_imag",
             "reference_scale_real", "reference_scale_imag",
             "Ex_amplitude_ratio", "Ey_amplitude_ratio", "Ez_amplitude_ratio",
-            "field_amplitude_enhancement", "total_field_enhancement",
+            "field_amplitude_enhancement", "scattered_field_amplitude_ratio",
+            "total_field_enhancement",
             "normalization_mode",
         ),
         rows,
@@ -526,6 +598,7 @@ def _save_broadband_results(
         (
             "frequency_1_per_um", "wavelength_nm",
             "maximum_field_amplitude_enhancement", "mean_field_amplitude_enhancement",
+            "maximum_scattered_field_amplitude_ratio", "mean_scattered_field_amplitude_ratio",
             "maximum_field_enhancement", "maximum_x_um", "maximum_y_um", "maximum_z_um",
         ),
         response_rows,

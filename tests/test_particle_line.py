@@ -1,10 +1,11 @@
 from pathlib import Path
+import json
 
 import pytest
 
 from surface_plasmons.particle_line import ParticleLineError, particle_line_positions
 from surface_plasmons.project import make_simulation_config, normalise_project_config
-from surface_plasmons.results import ExperimentWorkspace, ResultsError
+from surface_plasmons.results import ExperimentWorkspace, ResultsError, _write_json
 
 
 def _parameters(**updates):
@@ -111,3 +112,23 @@ def test_workspace_never_silently_overwrites(tmp_path: Path) -> None:
     workspace.set_status("interrupted")
     resumed = ExperimentWorkspace.create("named simulation", config, results_root=tmp_path, resume=True)
     assert resumed.directory == workspace.directory
+
+
+def test_json_write_falls_back_when_onedrive_blocks_replace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    destination = tmp_path / "manifest.json"
+    destination.write_text('{"old": true}\n', encoding="utf-8")
+
+    def locked_replace(source, target):
+        raise PermissionError(13, "OneDrive has locked the destination", target)
+
+    monkeypatch.setattr("surface_plasmons.results.os.replace", locked_replace)
+    monkeypatch.setattr("surface_plasmons.results.time.sleep", lambda _: None)
+
+    _write_json(destination, {"status": "completed"})
+
+    assert json.loads(destination.read_text(encoding="utf-8")) == {
+        "status": "completed"
+    }
+    assert not (tmp_path / "manifest.json.tmp").exists()

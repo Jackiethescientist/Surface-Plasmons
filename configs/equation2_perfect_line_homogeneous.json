@@ -1,5 +1,5 @@
 {
-  "simulation_name": "equation2_perfect_line_n9_homogeneous_test",
+  "simulation_name": "equation2_perfect_line_n9_homogeneous_test8",
   "precision": "fast",
   "geometry": {
     "particle_shape": "sphere",
@@ -21,7 +21,7 @@
   "measurement": {
     "probe_offset_from_particle_surface_um": 0.020,
     "normalization_mode": "global_complex_reference",
-    "field_map_frequencies": "none",
+    "field_map_frequencies": "auto",
     "maximum_auto_field_maps": 1
   }
 }

@@ -77,6 +77,8 @@ class FieldComparison:
     """Same-scale comparison of complex vector fields."""
 
     sample_count: int
+    spatial_sample_count: int
+    component_sample_count: int
     complex_nrmse: float
     amplitude_nrmse: float
     amplitude_correlation: float | None
@@ -87,6 +89,8 @@ class FieldComparison:
     def to_dict(self) -> dict[str, float | int | None]:
         return {
             "sample_count": self.sample_count,
+            "spatial_sample_count": self.spatial_sample_count,
+            "component_sample_count": self.component_sample_count,
             "complex_nrmse": self.complex_nrmse,
             "amplitude_nrmse": self.amplitude_nrmse,
             "amplitude_correlation": self.amplitude_correlation,
@@ -901,8 +905,21 @@ def compare_complex_fields(
         raise TheoryError("Complex fields contain no common finite samples.")
     complex_scale = float(np.sqrt(np.mean(np.abs(measured) ** 2))) or 1.0
     complex_nrmse = float(np.sqrt(np.mean(np.abs(measured - predicted) ** 2)) / complex_scale)
-    measured_amplitude = np.abs(measured)
-    predicted_amplitude = np.abs(predicted)
+    component_amplitude = np.abs(measured)
+    predicted_component_amplitude = np.abs(predicted)
+    if measured_original.ndim >= 2 and measured_original.shape[-1] == 3:
+        measured_amplitude = np.linalg.norm(measured_original, axis=-1).reshape(-1)
+        predicted_amplitude = np.linalg.norm(predicted_original, axis=-1).reshape(-1)
+        amplitude_finite = np.isfinite(measured_amplitude) & np.isfinite(
+            predicted_amplitude
+        )
+        measured_amplitude = measured_amplitude[amplitude_finite]
+        predicted_amplitude = predicted_amplitude[amplitude_finite]
+        spatial_sample_count = int(measured_amplitude.size)
+    else:
+        measured_amplitude = component_amplitude
+        predicted_amplitude = predicted_component_amplitude
+        spatial_sample_count = int(measured_amplitude.size)
     amplitude_scale = float(np.sqrt(np.mean(measured_amplitude**2))) or 1.0
     amplitude_nrmse = float(
         np.sqrt(np.mean((measured_amplitude - predicted_amplitude) ** 2)) / amplitude_scale
@@ -911,21 +928,19 @@ def compare_complex_fields(
         correlation = float(np.corrcoef(measured_amplitude, predicted_amplitude)[0, 1])
     else:
         correlation = None
-    phase_mask = (measured_amplitude > complex_scale * 1e-9) & (
-        predicted_amplitude > complex_scale * 1e-9
+    phase_mask = (component_amplitude > complex_scale * 1e-9) & (
+        predicted_component_amplitude > complex_scale * 1e-9
     )
     mean_phase_error = (
         float(np.mean(np.abs(np.angle(predicted[phase_mask] * np.conjugate(measured[phase_mask])))))
         if np.any(phase_mask) else None
     )
-    if measured_original.ndim >= 2 and measured_original.shape[-1] == 3:
-        measured_point_intensity = np.sum(np.abs(measured_original) ** 2, axis=-1).reshape(-1)
-        predicted_point_intensity = np.sum(np.abs(predicted_original) ** 2, axis=-1).reshape(-1)
-    else:
-        measured_point_intensity = measured_amplitude**2
-        predicted_point_intensity = predicted_amplitude**2
+    measured_point_intensity = measured_amplitude**2
+    predicted_point_intensity = predicted_amplitude**2
     return FieldComparison(
         sample_count=int(measured.size),
+        spatial_sample_count=spatial_sample_count,
+        component_sample_count=int(measured.size),
         complex_nrmse=complex_nrmse,
         amplitude_nrmse=amplitude_nrmse,
         amplitude_correlation=correlation,

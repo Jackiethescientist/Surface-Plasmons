@@ -17,6 +17,8 @@ from __future__ import annotations
 from argparse import ArgumentParser
 from pathlib import Path
 from typing import Any
+import csv
+import json
 
 from surface_plasmons.project import (
     ProjectConfigError,
@@ -26,11 +28,39 @@ from surface_plasmons.project import (
     normalise_project_config,
 )
 from surface_plasmons.particle_line import particle_line_positions
-from surface_plasmons.results import ResultsError
+from surface_plasmons.results import ResultsError, safe_simulation_name
+from surface_plasmons.validation import ValidationError, run_validation
 from surface_plasmons.workflow import WorkflowError, run_project
 
 
-DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "equation2_perfect_line_homogeneous.json"
+DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "perfect_line.json"
+
+THEORY_FORMULAS = {
+    "equation_1_quasistatic_sphere_polarizability": (
+        "alpha_0 = 4*pi*epsilon_b*a^3*(epsilon_p-epsilon_b)/(epsilon_p+2*epsilon_b)"
+    ),
+    "radiation_reaction_polarizability": (
+        "alpha_RR = alpha_0/[1-i*k^3*alpha_0/(6*pi*epsilon_b)]"
+    ),
+    "equation_2_coupled_dipoles": (
+        "E_loc,i = E0*exp(i*k.r_i) - sum_(j!=i) A_ij.P_j; P_i = alpha_i*E_loc,i"
+    ),
+    "equation_3_longitudinal_1d": (
+        "A_L(r) = -2*exp(i*k*r)*(1-i*k*r)/(4*pi*epsilon_b*r^3)"
+    ),
+    "equation_3_transverse_1d": (
+        "A_T(r) = exp(i*k*r)*[(1-i*k*r)/r^3-k^2/r]/(4*pi*epsilon_b)"
+    ),
+    "equation_4_uniform_chain": "P = E0/(1/alpha-S)",
+    "equation_5_finite_symmetric_sum": "S = -2*sum_(n=1..N) A(n*d)",
+    "mie_electric_dipole_polarizability": (
+        "alpha_Mie,a1 = 6*pi*i*epsilon_b*a1/k^3"
+    ),
+    "exact_mie_cross_sections": (
+        "C_ext=(2*pi/k^2)*sum_n(2n+1)Re(a_n+b_n); "
+        "C_sca=(2*pi/k^2)*sum_n(2n+1)(|a_n|^2+|b_n|^2); C_abs=C_ext-C_sca"
+    ),
+}
 
 
 def _duration(seconds: float) -> str:
@@ -39,6 +69,118 @@ def _duration(seconds: float) -> str:
     if seconds < 3600:
         return f"{seconds / 60:.1f} min"
     return f"{seconds / 3600:.1f} h"
+
+
+def _available_validation_name(simulation_directory: Path, requested: str) -> str:
+    """Choose a validation name without overwriting an earlier attempt."""
+
+    base = safe_simulation_name(requested)
+    validation_root = simulation_directory / "validation"
+    candidate = base
+    revision = 2
+    while (validation_root / candidate).exists():
+        candidate = f"{base}_v{revision}"
+        revision += 1
+    return candidate
+
+
+def _csv_value(value: str) -> Any:
+    stripped = value.strip()
+    if not stripped:
+        return None
+    try:
+        number = float(stripped)
+    except ValueError:
+        return stripped
+    if number.is_integer() and all(token not in stripped.lower() for token in (".", "e")):
+        return int(number)
+    return number
+
+
+def _read_csv_records(path: Path) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        return [
+            {key: _csv_value(value) for key, value in row.items()}
+            for row in csv.DictReader(handle)
+        ]
+
+
+def _write_automatic_validation_file(
+    simulation_directory: Path,
+    validation_directory: Path,
+    config: dict[str, Any],
+    active_particles: Any,
+) -> Path:
+    """Create one self-contained theory-validation record per simulation."""
+
+    summary_path = validation_directory / "validation_summary.json"
+    reports = json.loads(summary_path.read_text(encoding="utf-8"))
+    generated_files = sorted(
+        str(path.relative_to(simulation_directory))
+        for path in validation_directory.rglob("*")
+        if path.is_file()
+    )
+    hierarchy_rows = _read_csv_records(
+        validation_directory / "model_hierarchy_spectrum.csv"
+    )
+    particle_rows = _read_csv_records(
+        validation_directory / "one_dimensional_particle_response.csv"
+    )
+    equation2_rows = _read_csv_records(
+        validation_directory / "equation2_external_field_comparison.csv"
+    )
+    equation2_particles = _read_csv_records(
+        validation_directory / "equation2_particle_solution.csv"
+    )
+    agreement_values = [
+        reports.get("theory", {}).get("agreement_status"),
+        reports.get("hierarchy", {}).get("agreement_status"),
+    ]
+    if "failed" in agreement_values:
+        overall_status = "failed_model_agreement"
+    elif any(value == "passed_qualitative_only" for value in agreement_values):
+        overall_status = "provisional_qualitative_agreement_requires_convergence"
+    else:
+        overall_status = "provisional_requires_resolution_and_domain_convergence"
+    payload = {
+        "schema_version": 1,
+        "simulation_name": config["simulation_name"],
+        "simulation_directory": str(simulation_directory),
+        "validation_scope": {
+            "automatic_checks": ["configuration", "theory", "hierarchy", "time"],
+            "uses_existing_meep_results": True,
+            "starts_additional_meep_runs": False,
+            "manual_checks_not_run": ["resolution", "domain"],
+        },
+        "overall_validation_status": overall_status,
+        "simulation_variables": config,
+        "derived_geometry": {
+            "nominal_particle_count": int(config["geometry"]["particle_count"]),
+            "active_particle_count": len(active_particles),
+            "particle_positions_um": [particle.to_dict() for particle in active_particles],
+            "defects": config["geometry"].get("defects", []),
+        },
+        "theory_formulas": THEORY_FORMULAS,
+        "formula_substitutions_and_model_results_by_wavelength": hierarchy_rows,
+        "one_dimensional_particle_results": particle_rows,
+        "equation2_external_field_comparison_at_selected_wavelength": equation2_rows,
+        "equation2_particle_solution_at_selected_wavelength": equation2_particles,
+        "validation_reports": reports,
+        "generated_validation_files": generated_files,
+        "interpretation": (
+            "Each per-wavelength row contains the numerical inputs substituted into the "
+            "listed formulas, their theory outputs, and the matching MEEP result. Empty "
+            "Equation-4/5 values mean the identical perfect-chain assumption did not apply."
+        ),
+    }
+    destination = simulation_directory / "automatic_theory_validation.json"
+    destination.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False, default=str) + "\n",
+        encoding="utf-8",
+    )
+    return destination
 
 
 def parse_args() -> Any:
@@ -57,6 +199,16 @@ def parse_args() -> Any:
     parser.add_argument("--results-root", type=Path)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--no-reference-cache", action="store_true")
+    parser.add_argument(
+        "--skip-validation",
+        action="store_true",
+        help="Skip automatic read-only configuration, Equation-2, 1-D and Mie validation.",
+    )
+    parser.add_argument(
+        "--validation-name",
+        default="automatic_theory_validation_v1",
+        help="Name for this run's detailed validation subfolder.",
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -99,6 +251,7 @@ def main() -> None:
     maps = args.field_maps if args.field_maps is not None else config["measurement"]["field_map_frequencies"]
     print(f"Narrowband field maps: {maps}")
     print(f"Reference reuse: {'disabled' if args.no_reference_cache else 'enabled'}")
+    print(f"Automatic theory validation: {'disabled' if args.skip_validation else 'enabled'}")
     if args.dry_run:
         print("Dry run complete; MEEP was not started and no result folder was created.")
         return
@@ -115,6 +268,29 @@ def main() -> None:
         raise SystemExit("Simulation interrupted. Partial results and status were preserved.")
     except (ProjectConfigError, ResultsError, WorkflowError, RuntimeError, ValueError) as exc:
         raise SystemExit(f"Simulation failed: {exc}") from exc
+    if not args.skip_validation:
+        validation_name = _available_validation_name(
+            workspace.directory, args.validation_name
+        )
+        try:
+            validation_directory = run_validation(
+                workspace.directory,
+                validation_name=validation_name,
+                checks=("configuration", "theory", "hierarchy", "time"),
+            )
+            automatic_file = _write_automatic_validation_file(
+                workspace.directory,
+                validation_directory,
+                config,
+                active_particles,
+            )
+        except (OSError, ValidationError, ResultsError, RuntimeError, ValueError) as exc:
+            raise SystemExit(
+                "Simulation completed, but automatic validation failed: "
+                f"{exc}. The simulation results were preserved in {workspace.directory}."
+            ) from exc
+        print(f"Detailed validation folder: {validation_directory}")
+        print(f"Automatic validation file: {automatic_file}")
     print(f"Completed simulation folder: {workspace.directory}")
 
 

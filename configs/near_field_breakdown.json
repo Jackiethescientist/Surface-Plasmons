@@ -1,0 +1,31 @@
+{
+  "simulation_name": "equation2_near_field_breakdown_n9_homogeneous_v1",
+  "precision": "final",
+  "geometry": {
+    "particle_shape": "sphere",
+    "particle_count": 9,
+    "particle_material": "au",
+    "background_material": "air",
+    "substrate_material": "air",
+    "particle_radius_um": 0.040,
+    "spacing_um": 0.150,
+    "substrate_thickness_um": 0.300,
+    "surface_y_um": 0.0,
+    "particle_surface_gap_um": 0.0,
+    "defects": []
+  },
+  "source": {
+    "wavelength_range_nm": [450.0, 800.0],
+    "propagation_axis": "y",
+    "propagation_direction": -1,
+    "polarisation": "Ex"
+  },
+  "measurement": {
+    "field_components": ["Ex", "Ey", "Ez"],
+    "probe_margin_um": 0.050,
+    "probe_offset_from_particle_surface_um": 0.020,
+    "normalization_mode": "pointwise_amplitude_reference",
+    "field_map_frequencies": "none",
+    "maximum_auto_field_maps": 1
+  }
+}

@@ -368,6 +368,21 @@ def test_external_field_and_same_scale_comparison() -> None:
     assert np.all(np.isfinite(field))
     assert report.complex_nrmse == pytest.approx(0.0)
     assert report.amplitude_nrmse == pytest.approx(0.0)
+    assert report.spatial_sample_count == 1
+    assert report.component_sample_count == 3
+
+
+def test_vector_amplitude_correlation_uses_total_field_per_point() -> None:
+    measured = np.asarray([[10.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=complex)
+    predicted = np.asarray([[1.0, 0.0, 0.0], [0.0, 10.0, 0.0]], dtype=complex)
+
+    report = compare_complex_fields(measured, predicted)
+
+    assert report.spatial_sample_count == 2
+    assert report.component_sample_count == 6
+    assert report.amplitude_correlation == pytest.approx(-1.0)
+    assert report.maximum_index_simulation == 0
+    assert report.maximum_index_theory == 1
     mie_dipole_polarizability,
     mie_sphere_cross_sections,
     one_dimensional_dipole_sum,

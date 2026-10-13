@@ -8,7 +8,9 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any, Mapping
 import json
+import os
 import re
+import time
 
 from .database import canonical_json, find_project_root
 
@@ -33,9 +35,49 @@ def config_hash(config: Mapping[str, Any]) -> str:
 
 
 def _write_json(path: Path, value: Any) -> None:
+    """Write JSON atomically where possible, with a OneDrive-safe fallback.
+
+    Windows/WSL folders synchronised by OneDrive can briefly refuse the final
+    ``os.replace`` even though both the destination directory and temporary
+    file are writable.  Retry that atomic operation first.  If the sync client
+    keeps the destination locked, fall back to an in-place write so a completed
+    simulation is not incorrectly reported as failed solely while updating its
+    manifest.
+    """
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(value, indent=2, ensure_ascii=False) + "\n"
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    temporary.replace(path)
+    temporary.write_text(payload, encoding="utf-8")
+    replace_error: PermissionError | None = None
+    for attempt in range(8):
+        try:
+            os.replace(temporary, path)
+            return
+        except PermissionError as exc:
+            replace_error = exc
+            time.sleep(min(0.05 * (2**attempt), 0.5))
+
+    try:
+        path.write_text(payload, encoding="utf-8")
+    except OSError as exc:
+        raise ResultsError(
+            f"Could not update {path}. The atomic rename was repeatedly denied "
+            "and the direct-write fallback also failed. Pause OneDrive syncing "
+            "for this folder or move the project outside OneDrive."
+        ) from exc
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            # The requested JSON has already been written successfully.  A
+            # sync-client lock on the stale .tmp file is not fatal.
+            pass
+
+    if replace_error is None:  # pragma: no cover - defensive guard
+        raise ResultsError(f"Could not atomically update {path}.")
 
 
 @dataclass(slots=True)

@@ -38,6 +38,15 @@ def test_all_enhancement_outputs_use_field_amplitude_ratio() -> None:
     assert result["enhancement"].reshape(-1) == pytest.approx([2.0, 4.0])
     assert result["Ex_amplitude_ratio"].reshape(-1) == pytest.approx([2.0, 4.0])
     assert result["normalised_Ex"].reshape(-1) == pytest.approx([2.0, 4.0])
+    assert result["normalised_reference_Ex"].reshape(-1) == pytest.approx(
+        [1.0, 1.0]
+    )
+    assert result["normalised_scattered_Ex"].reshape(-1) == pytest.approx(
+        [1.0, 3.0]
+    )
+    assert result["scattered_amplitude_enhancement"].reshape(-1) == pytest.approx(
+        [1.0, 3.0]
+    )
     assert "intensity_enhancement" not in result
 
 
