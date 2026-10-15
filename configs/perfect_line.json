@@ -1,15 +1,17 @@
 {
-  "simulation_name": "perfect_line_n9_spacing150nm_test5",
-  "precision": "fast",
+  "simulation_name": "single_sphere_homogeneous_benchmark_1",
+  "precision": "final",
   "geometry": {
     "particle_shape": "sphere",
-    "particle_count": 9,
+    "particle_count": 1,
     "particle_material": "au",
     "background_material": "air",
-    "substrate_material": "sio2",
+    "substrate_material": "air",
     "particle_radius_um": 0.040,
     "spacing_um": 0.150,
     "substrate_thickness_um": 0.300,
+    "surface_y_um": 0.0,
+    "particle_surface_gap_um": 0.0,
     "defects": []
   },
   "source": {
@@ -19,7 +21,11 @@
     "polarisation": "Ex"
   },
   "measurement": {
-    "field_map_frequencies": "auto",
+    "field_components": ["Ex", "Ey", "Ez"],
+    "probe_margin_um": 0.150,
+    "probe_offset_from_particle_surface_um": 0.080,
+    "normalization_mode": "pointwise_amplitude_reference",
+    "field_map_frequencies": "none",
     "maximum_auto_field_maps": 1
   }
 }
