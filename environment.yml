@@ -13,6 +13,6 @@ dependencies:
   - jupyterlab>=4
   - ipykernel
   - pytest>=8
-  - build>=1.2
+  - python-build>=1.2
   - twine>=5
   - pip
