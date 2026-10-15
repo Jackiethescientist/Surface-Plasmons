@@ -33,7 +33,7 @@ from surface_plasmons.validation import ValidationError, run_validation
 from surface_plasmons.workflow import WorkflowError, run_project
 
 
-DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "perfect_line.json"
+DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "perfect_line.json" 
 
 THEORY_FORMULAS = {
     "equation_1_quasistatic_sphere_polarizability": (
@@ -295,4 +295,11 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    import sys
+
+    DRY_RUN = False  # Change to False for a real simulation
+
+    if DRY_RUN and "--dry-run" not in sys.argv:
+        sys.argv.append("--dry-run")
+
     main()
