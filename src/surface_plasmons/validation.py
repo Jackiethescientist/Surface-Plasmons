@@ -1037,6 +1037,10 @@ def _hierarchy_check(config: Mapping[str, Any], experiment: Path, output: Path) 
         f"normalised_{component}_{part}"
         for component in ("Ex", "Ey", "Ez")
         for part in ("real", "imag")
+    } | {
+        f"normalised_reference_{component}_{part}"
+        for component in ("Ex", "Ey", "Ez")
+        for part in ("real", "imag")
     }
     if not required.issubset(field_rows[0]):
         raise ValidationError(
@@ -1111,6 +1115,20 @@ def _hierarchy_check(config: Mapping[str, Any], experiment: Path, output: Path) 
             ],
             dtype=complex,
         )
+        measured_reference = np.asarray(
+            [
+                [
+                    complex(
+                        float(row[f"normalised_reference_{component}_real"]),
+                        float(row[f"normalised_reference_{component}_imag"]),
+                    )
+                    for component in ("Ex", "Ey", "Ez")
+                ]
+                for row in profile_rows
+            ],
+            dtype=complex,
+        )
+        measured_scattered = measured - measured_reference
         epsilon_particle = _nearest_material_epsilon(
             dielectric_rows, "particle", wavelength_nm
         )
@@ -1230,6 +1248,13 @@ def _hierarchy_check(config: Mapping[str, Any], experiment: Path, output: Path) 
             incident_direction=direction,
             incident_polarisation=polarisation,
         )
+        incident_at_points = (
+            np.exp(1j * wavevector * (points @ direction))[:, np.newaxis]
+            * polarisation
+        )
+        quasistatic_scattered = field_quasistatic - incident_at_points
+        retarded_scattered = field_retarded - incident_at_points
+        mie_dipole_scattered = field_mie - incident_at_points
         centre_particle_x = min(
             (particle.actual_x_um for particle in positions),
             key=abs,
@@ -1241,6 +1266,18 @@ def _hierarchy_check(config: Mapping[str, Any], experiment: Path, output: Path) 
         quasistatic_amplitudes = np.linalg.norm(field_quasistatic, axis=1)
         retarded_amplitudes = np.linalg.norm(field_retarded, axis=1)
         mie_dipole_amplitudes = np.linalg.norm(field_mie, axis=1)
+        measured_scattered_amplitudes = np.linalg.norm(
+            measured_scattered, axis=1
+        )
+        quasistatic_scattered_amplitudes = np.linalg.norm(
+            quasistatic_scattered, axis=1
+        )
+        retarded_scattered_amplitudes = np.linalg.norm(
+            retarded_scattered, axis=1
+        )
+        mie_dipole_scattered_amplitudes = np.linalg.norm(
+            mie_dipole_scattered, axis=1
+        )
         vector_local_component = vector_retarded.local_fields[:, component_index]
         consistency_scale = float(np.linalg.norm(vector_local_component)) or 1.0
         scalar_vector_error = float(
@@ -1368,6 +1405,42 @@ def _hierarchy_check(config: Mapping[str, Any], experiment: Path, output: Path) 
                 "mie_dipole_cda_max_external_E_over_E0": float(
                     np.max(mie_dipole_amplitudes)
                 ),
+                "meep_central_probe_Escat_over_Eref": float(
+                    measured_scattered_amplitudes[centre_probe_index]
+                ),
+                "cda_quasistatic_central_probe_Escat_over_E0": float(
+                    quasistatic_scattered_amplitudes[centre_probe_index]
+                ),
+                "cda_equations2_3_central_probe_Escat_over_E0": float(
+                    retarded_scattered_amplitudes[centre_probe_index]
+                ),
+                "mie_dipole_cda_central_probe_Escat_over_E0": float(
+                    mie_dipole_scattered_amplitudes[centre_probe_index]
+                ),
+                "meep_rms_external_Escat_over_Eref": float(
+                    np.sqrt(np.mean(measured_scattered_amplitudes**2))
+                ),
+                "cda_quasistatic_rms_external_Escat_over_E0": float(
+                    np.sqrt(np.mean(quasistatic_scattered_amplitudes**2))
+                ),
+                "cda_equations2_3_rms_external_Escat_over_E0": float(
+                    np.sqrt(np.mean(retarded_scattered_amplitudes**2))
+                ),
+                "mie_dipole_cda_rms_external_Escat_over_E0": float(
+                    np.sqrt(np.mean(mie_dipole_scattered_amplitudes**2))
+                ),
+                "meep_max_external_Escat_over_Eref": float(
+                    np.max(measured_scattered_amplitudes)
+                ),
+                "cda_quasistatic_max_external_Escat_over_E0": float(
+                    np.max(quasistatic_scattered_amplitudes)
+                ),
+                "cda_equations2_3_max_external_Escat_over_E0": float(
+                    np.max(retarded_scattered_amplitudes)
+                ),
+                "mie_dipole_cda_max_external_Escat_over_E0": float(
+                    np.max(mie_dipole_scattered_amplitudes)
+                ),
                 "scalar_1d_max_local_E_over_E0": float(
                     np.max(np.abs(scalar.local_fields))
                 ),
@@ -1449,6 +1522,54 @@ def _hierarchy_check(config: Mapping[str, Any], experiment: Path, output: Path) 
     )
     mie_dipole_rms = np.asarray(
         [row["mie_dipole_cda_rms_external_E_over_E0"] for row in spectrum_rows],
+        dtype=float,
+    )
+    meep_scattered_external = np.asarray(
+        [row["meep_max_external_Escat_over_Eref"] for row in spectrum_rows],
+        dtype=float,
+    )
+    quasistatic_scattered_external = np.asarray(
+        [row["cda_quasistatic_max_external_Escat_over_E0"] for row in spectrum_rows],
+        dtype=float,
+    )
+    retarded_scattered_external = np.asarray(
+        [row["cda_equations2_3_max_external_Escat_over_E0"] for row in spectrum_rows],
+        dtype=float,
+    )
+    mie_dipole_scattered_external = np.asarray(
+        [row["mie_dipole_cda_max_external_Escat_over_E0"] for row in spectrum_rows],
+        dtype=float,
+    )
+    meep_scattered_central = np.asarray(
+        [row["meep_central_probe_Escat_over_Eref"] for row in spectrum_rows],
+        dtype=float,
+    )
+    quasistatic_scattered_central = np.asarray(
+        [row["cda_quasistatic_central_probe_Escat_over_E0"] for row in spectrum_rows],
+        dtype=float,
+    )
+    retarded_scattered_central = np.asarray(
+        [row["cda_equations2_3_central_probe_Escat_over_E0"] for row in spectrum_rows],
+        dtype=float,
+    )
+    mie_dipole_scattered_central = np.asarray(
+        [row["mie_dipole_cda_central_probe_Escat_over_E0"] for row in spectrum_rows],
+        dtype=float,
+    )
+    meep_scattered_rms = np.asarray(
+        [row["meep_rms_external_Escat_over_Eref"] for row in spectrum_rows],
+        dtype=float,
+    )
+    quasistatic_scattered_rms = np.asarray(
+        [row["cda_quasistatic_rms_external_Escat_over_E0"] for row in spectrum_rows],
+        dtype=float,
+    )
+    retarded_scattered_rms = np.asarray(
+        [row["cda_equations2_3_rms_external_Escat_over_E0"] for row in spectrum_rows],
+        dtype=float,
+    )
+    mie_dipole_scattered_rms = np.asarray(
+        [row["mie_dipole_cda_rms_external_Escat_over_E0"] for row in spectrum_rows],
         dtype=float,
     )
     scalar_local = np.asarray(
@@ -1537,6 +1658,59 @@ def _hierarchy_check(config: Mapping[str, Any], experiment: Path, output: Path) 
     )
     plt.close(figure)
 
+    figure, axes = plt.subplots(3, 1, figsize=(9.5, 12.0), sharex=True)
+    for axis, measured_values, model_values, title, ylabel in (
+        (
+            axes[0],
+            meep_scattered_external,
+            (
+                quasistatic_scattered_external,
+                retarded_scattered_external,
+                mie_dipole_scattered_external,
+            ),
+            "Maximum scattered field over the external probe line",
+            r"Maximum $|E_{scat}|/|E_{ref}|$ or $|E_{scat}|/|E_0|$",
+        ),
+        (
+            axes[1],
+            meep_scattered_central,
+            (
+                quasistatic_scattered_central,
+                retarded_scattered_central,
+                mie_dipole_scattered_central,
+            ),
+            "Scattered field at the fixed central probe",
+            r"Central $|E_{scat}|/|E_{ref}|$ or $|E_{scat}|/|E_0|$",
+        ),
+        (
+            axes[2],
+            meep_scattered_rms,
+            (
+                quasistatic_scattered_rms,
+                retarded_scattered_rms,
+                mie_dipole_scattered_rms,
+            ),
+            "RMS scattered field over the external probe line",
+            r"RMS $|E_{scat}|/|E_{ref}|$ or $|E_{scat}|/|E_0|$",
+        ),
+    ):
+        axis.plot(wavelengths, measured_values, linewidth=2.0, label="3-D MEEP FDTD")
+        axis.plot(wavelengths, model_values[0], label="Quasistatic CDA")
+        axis.plot(wavelengths, model_values[1], label="Equations 2-3 CDA")
+        axis.plot(wavelengths, model_values[2], label="Mie-dipole CDA")
+        axis.set_ylabel(ylabel)
+        axis.set_title(title)
+        axis.grid(alpha=0.22)
+        axis.legend(frameon=False)
+    axes[2].set_xlabel("Vacuum wavelength (nm)")
+    figure.tight_layout()
+    figure.savefig(
+        output / "scattered_field_model_hierarchy.png",
+        dpi=230,
+        bbox_inches="tight",
+    )
+    plt.close(figure)
+
     nominal_count = int(config["geometry"]["particle_count"])
     heatmap = np.full((len(wavelengths), nominal_count), np.nan, dtype=float)
     for wavelength_index, amplitudes in enumerate(local_scalar_by_wavelength):
@@ -1570,7 +1744,7 @@ def _hierarchy_check(config: Mapping[str, Any], experiment: Path, output: Path) 
         "execution_status": "completed",
         "applicability_status": "passed",
         "agreement_status": _same_scale_spectrum_metrics(
-            meep_central, retarded_central, wavelengths
+            meep_scattered_central, retarded_scattered_central, wavelengths
         )["agreement_status"],
         "numerical_convergence_status": "not_run_by_hierarchy_check",
         "requirements": requirements,
@@ -1619,6 +1793,57 @@ def _hierarchy_check(config: Mapping[str, Any], experiment: Path, output: Path) 
             ),
             "mie_dipole_cda_vs_meep": _same_scale_spectrum_metrics(
                 meep_rms, mie_dipole_rms, wavelengths
+            ),
+        },
+        "maximum_scattered_field_comparisons": {
+            "quasistatic_cda_vs_meep": _same_scale_spectrum_metrics(
+                meep_scattered_external,
+                quasistatic_scattered_external,
+                wavelengths,
+            ),
+            "retarded_equations2_3_cda_vs_meep": _same_scale_spectrum_metrics(
+                meep_scattered_external,
+                retarded_scattered_external,
+                wavelengths,
+            ),
+            "mie_dipole_cda_vs_meep": _same_scale_spectrum_metrics(
+                meep_scattered_external,
+                mie_dipole_scattered_external,
+                wavelengths,
+            ),
+        },
+        "fixed_central_probe_scattered_field_comparisons": {
+            "quasistatic_cda_vs_meep": _same_scale_spectrum_metrics(
+                meep_scattered_central,
+                quasistatic_scattered_central,
+                wavelengths,
+            ),
+            "retarded_equations2_3_cda_vs_meep": _same_scale_spectrum_metrics(
+                meep_scattered_central,
+                retarded_scattered_central,
+                wavelengths,
+            ),
+            "mie_dipole_cda_vs_meep": _same_scale_spectrum_metrics(
+                meep_scattered_central,
+                mie_dipole_scattered_central,
+                wavelengths,
+            ),
+        },
+        "rms_scattered_probe_line_comparisons": {
+            "quasistatic_cda_vs_meep": _same_scale_spectrum_metrics(
+                meep_scattered_rms,
+                quasistatic_scattered_rms,
+                wavelengths,
+            ),
+            "retarded_equations2_3_cda_vs_meep": _same_scale_spectrum_metrics(
+                meep_scattered_rms,
+                retarded_scattered_rms,
+                wavelengths,
+            ),
+            "mie_dipole_cda_vs_meep": _same_scale_spectrum_metrics(
+                meep_scattered_rms,
+                mie_dipole_scattered_rms,
+                wavelengths,
             ),
         },
         "equation4_dipole_sum": (

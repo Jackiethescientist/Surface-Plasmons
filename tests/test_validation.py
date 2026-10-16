@@ -32,6 +32,9 @@ def test_equation2_validation_keeps_common_scale_and_labels_axes(tmp_path) -> No
         "normalised_Ex_real", "normalised_Ex_imag",
         "normalised_Ey_real", "normalised_Ey_imag",
         "normalised_Ez_real", "normalised_Ez_imag",
+        "normalised_reference_Ex_real", "normalised_reference_Ex_imag",
+        "normalised_reference_Ey_real", "normalised_reference_Ey_imag",
+        "normalised_reference_Ez_real", "normalised_reference_Ez_imag",
     ]
     rows = []
     for x in (-0.12, -0.06, 0.0, 0.06, 0.12):
@@ -47,6 +50,12 @@ def test_equation2_validation_keeps_common_scale_and_labels_axes(tmp_path) -> No
                 "normalised_Ey_imag": 0.0,
                 "normalised_Ez_real": 0.0,
                 "normalised_Ez_imag": 0.0,
+                "normalised_reference_Ex_real": 1.0,
+                "normalised_reference_Ex_imag": 0.0,
+                "normalised_reference_Ey_real": 0.0,
+                "normalised_reference_Ey_imag": 0.0,
+                "normalised_reference_Ez_real": 0.0,
+                "normalised_reference_Ez_imag": 0.0,
             }
         )
     _write_csv(scan / "field_strength_vs_position_and_frequency.csv", columns, rows)
@@ -104,6 +113,7 @@ def test_equation2_validation_keeps_common_scale_and_labels_axes(tmp_path) -> No
     assert (output / "model_hierarchy_comparison.png").is_file()
     assert (output / "one_dimensional_defect_response.png").is_file()
     assert (output / "fixed_probe_and_rms_spectrum_comparison.png").is_file()
+    assert (output / "scattered_field_model_hierarchy.png").is_file()
     with (output / "model_hierarchy_spectrum.csv").open(
         newline="", encoding="utf-8-sig"
     ) as handle:
@@ -118,8 +128,14 @@ def test_equation2_validation_keeps_common_scale_and_labels_axes(tmp_path) -> No
     assert "mie_a1_real" in hierarchy_row
     assert "meep_central_probe_E_over_Eref" in hierarchy_row
     assert "meep_rms_external_E_over_Eref" in hierarchy_row
+    assert "meep_central_probe_Escat_over_Eref" in hierarchy_row
+    assert "meep_rms_external_Escat_over_Eref" in hierarchy_row
+    assert "meep_max_external_Escat_over_Eref" in hierarchy_row
     assert hierarchy["numerical_convergence_status"] == "not_run_by_hierarchy_check"
     assert "fixed_central_probe_comparisons" in hierarchy
+    assert "maximum_scattered_field_comparisons" in hierarchy
+    assert "fixed_central_probe_scattered_field_comparisons" in hierarchy
+    assert "rms_scattered_probe_line_comparisons" in hierarchy
 
 
 def test_formal_equation2_benchmark_rejects_substrate_interface(tmp_path) -> None:
