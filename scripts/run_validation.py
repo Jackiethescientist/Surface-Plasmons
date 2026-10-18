@@ -21,17 +21,23 @@ def main():
     parser.add_argument("--results-root", type=Path)
     parser.add_argument("--resolutions")
     parser.add_argument("--paddings")
-    parser.add_argument("--time-factors", help="Comma-separated duration factors; default 1,1.5,2")
+    parser.add_argument("--time-factors", help="Comma-separated duration factors; default 1,2")
     parser.add_argument("--field-tolerance", type=float, default=0.05)
     parser.add_argument("--peak-tolerance", type=float, default=0.02)
     parser.add_argument("--no-reference-cache", action="store_true")
+    parser.add_argument(
+        "--full-resolution-ladder",
+        action="store_true",
+        help="Run every requested resolution instead of stopping early.",
+    )
     args = parser.parse_args()
     try:
         output = run_validation(args.simulation, validation_name=args.name,
             checks=args.checks.split(","), results_root=args.results_root,
             resolutions=_numbers(args.resolutions, int), paddings_um=_numbers(args.paddings),
             time_factors=_numbers(args.time_factors), tolerance=args.field_tolerance,
-            peak_tolerance=args.peak_tolerance, cache_enabled=not args.no_reference_cache)
+            peak_tolerance=args.peak_tolerance, cache_enabled=not args.no_reference_cache,
+            adaptive_resolution=not args.full_resolution_ladder)
     except KeyboardInterrupt:
         raise SystemExit("Validation interrupted. Completed numerical samples were preserved.")
     except (ValidationError, ResultsError, RuntimeError, ValueError, OSError) as exc:

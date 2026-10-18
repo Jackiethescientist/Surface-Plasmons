@@ -2,32 +2,48 @@
 from __future__ import annotations
 from argparse import ArgumentParser
 from copy import deepcopy
+from email.mime import base
+from email.mime import base
 from pathlib import Path
 import json
 import csv
+import profile
 
 import numpy as np
 
 from surface_plasmons.database import find_project_root
-from surface_plasmons.project import load_project_config, normalise_project_config
+from surface_plasmons.project import load_project_config, normalise_project_config, PRECISION_MODES
 from surface_plasmons.results import config_hash, safe_simulation_name
 from surface_plasmons.validation import run_validation, ValidationError
 from surface_plasmons.workflow import run_project
 
 
 def cases(base, prefix):
+    base = deepcopy(base)
+    profile = {**PRECISION_MODES[base["precision"]], **base["numerics"]}
+    for key in ("broadband_resolution", "field_resolution", "nfreq"):
+        base["numerics"][key] = int(profile[key])
     result = []
     for orientation, pol in (("longitudinal", "Ex"), ("transverse", "Ez")):
         config = deepcopy(base)
         config["simulation_name"] = f"{prefix}_single_{orientation}"
         config["source"]["polarisation"] = pol
         result.append(("single", orientation, None, normalise_project_config(config)))
-    for gap_nm in (3.0, 4.0, 5.0):
+    for gap_nm in (40.0, 60.0, 80.0):
         for orientation, pol in (("longitudinal", "Ex"), ("transverse", "Ez")):
             config = deepcopy(base)
             config["simulation_name"] = f"{prefix}_pair_gap{gap_nm:g}nm_{orientation}"
             config["geometry"].update(particle_count=2, spacing_um=2*base["geometry"]["particle_radius_um"]+gap_nm/1000)
             config["source"]["polarisation"] = pol
+            config["numerics"].update(
+                broadband_resolution=max(
+                    120, int(base["numerics"]["broadband_resolution"])
+                ),
+                field_resolution=max(
+                    120, int(base["numerics"]["field_resolution"])
+                ),
+                nfreq=max(81, int(base["numerics"]["nfreq"])),
+            )
             result.append(("pair", orientation, gap_nm, normalise_project_config(config)))
     return result
 
@@ -107,7 +123,7 @@ def write_summary(root, entries, prefix):
 def main():
     parser = ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path(__file__).resolve().parents[1]/"configs/notes_single_sphere.json")
-    parser.add_argument("--name", default="electrostatic_notes_v1", help="Prefix for all cases; reuse for an identical restart.")
+    parser.add_argument("--name", default="electrostatic_notes_v2", help="Prefix for all cases; reuse for an identical restart.")
     parser.add_argument("--stage", choices=("single", "pairs", "convergence", "summary", "all"), default="single")
     parser.add_argument("--convergence-scope", choices=("single", "pairs", "all"), default="single")
     parser.add_argument("--results-root", type=Path)

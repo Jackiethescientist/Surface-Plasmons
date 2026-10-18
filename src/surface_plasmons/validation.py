@@ -330,8 +330,46 @@ def _sample_response(actual, reference, config, points):
     return np.stack(components, axis=-1)
 
 
-def _convergence(config, experiment, output, kind, values, cache_enabled):
+def _convergence_metrics(profile, reference):
+    value, wave, field = profile
+    _, ref_wave, ref_field = reference
+    if wave.shape != ref_wave.shape or not np.allclose(wave, ref_wave):
+        raise ValidationError("Convergence cases have different frequency grids.")
+    response = np.sqrt(np.mean(np.abs(field)**2, axis=(1, 2)))
+    ref_response = np.sqrt(np.mean(np.abs(ref_field)**2, axis=(1, 2)))
+    peak, refpeak = _peak(wave, response), _peak(wave, ref_response)
+    resolved = peak["status"] == refpeak["status"] == "resolved_sampled_peak"
+    sampling_ok = resolved and all(p["sampling_uncertainty_nm"] / p["wavelength_nm"] <= .02 for p in (peak, refpeak))
+    return {"value": value, "complex_field_relative_l2_change": _nrmse(field, ref_field),
+            "relative_peak_wavelength_change": abs(peak["wavelength_nm"]-refpeak["wavelength_nm"])/refpeak["wavelength_nm"],
+            "peak_resolved": bool(sampling_ok),
+            "relative_peak_amplitude_change": float(abs(np.max(response)-np.max(ref_response))/max(np.max(ref_response), 1e-30))}
+
+
+def _convergence_passed(metrics):
+    error = metrics["complex_field_relative_l2_change"]
+    return (error is not None and error <= .05
+            and metrics["relative_peak_wavelength_change"] <= .02
+            and metrics["relative_peak_amplitude_change"] <= .05 and metrics["peak_resolved"])
+
+
+def _saved_baseline_samples(raw, points):
+    """Reuse saved baseline fields; no duplicate MEEP calculation is needed."""
+    wavelengths = np.asarray(sorted({float(row["wavelength_nm"]) for row in raw}))
+    responses = []
+    for wavelength in wavelengths:
+        selected = sorted([row for row in raw if float(row["wavelength_nm"]) == wavelength], key=lambda row:float(row["x_um"]))
+        x = np.asarray([float(row["x_um"]) for row in selected])
+        scattered = _vectors(selected, "normalised_") - _vectors(selected, "normalised_reference_")
+        responses.append(np.stack([np.interp(points, x, scattered[:,j].real)
+                                   + 1j*np.interp(points, x, scattered[:,j].imag) for j in range(3)], axis=-1))
+    return wavelengths, np.asarray(responses)
+
+
+def _convergence(config, experiment, output, kind, values, cache_enabled, *, adaptive_resolution=True):
     from .workflow import run_broadband_stage
+    if config["measurement"]["normalization_mode"] != "global_complex_reference":
+        raise ValidationError("Numerical field comparison requires global_complex_reference normalization.")
     values = sorted(set(float(v) for v in values))
     if len(values) < 2 or any(not np.isfinite(v) or v <= 0 for v in values):
         raise ValidationError(f"{kind} needs at least two distinct positive values.")
@@ -351,52 +389,56 @@ def _convergence(config, experiment, output, kind, values, cache_enabled):
     points = original_points[keep, 0]
     if len(points) < 4:
         raise ValidationError("Too few common exterior points for convergence; extend the monitor.")
-    records, profiles = [], []
+    profiles, sources = [], []
     for value in values:
-        candidate = deepcopy(config)
-        if kind == "resolution": candidate["numerics"]["broadband_resolution"] = int(value)
-        elif kind == "domain": candidate["numerics"]["padding_um"] = value
+        baseline_value = base_res if kind == "resolution" else (float(config["numerics"]["padding_um"]) if kind == "domain" else 1.)
+        if value == baseline_value:
+            wavelengths, response = _saved_baseline_samples(raw, points)
+            sources.append("saved_baseline")
         else:
-            profile = _profile(config)
-            candidate["numerics"].update(minimum_run_time=float(profile["minimum_run_time"])*value,
-                                          maximum_run_time=float(profile["maximum_run_time"])*value,
-                                          dft_decay_tolerance=float(profile["dft_decay_tolerance"])/value)
-        run_identity = config_hash({"config": candidate, "validation_directory": str(output), "kind": kind, "value": value})[:10]
-        candidate["simulation_name"] = f"{safe_simulation_name(config['simulation_name'])[:40]}_{kind}_{value:g}_{run_identity}"
-        digest = config_hash(candidate)
-        runroot = output / "numerical_runs" / kind
-        target = runroot / safe_simulation_name(candidate["simulation_name"])
-        saved = target / "comparison_samples.npz"
-        marker = target / "comparison_signature.json"
-        signature = {"config_hash": digest, "sample_x_um": points.tolist()}
-        if saved.is_file() and marker.is_file() and json.loads(marker.read_text()) == signature:
-            with np.load(saved) as archive:
-                wavelengths, response = archive["wavelengths"], archive["fields"]
-        else:
-            workspace = ExperimentWorkspace.create(candidate["simulation_name"], candidate, results_root=runroot, resume=target.exists())
-            _, actual, reference, _ = run_broadband_stage(candidate, workspace, cache_enabled=cache_enabled)
-            response = _sample_response(actual, reference, candidate, points)
-            wavelengths = actual.wavelengths_um * 1000
-            np.savez_compressed(saved, wavelengths=wavelengths, fields=response)
-            _write_json(marker, signature)
-            workspace.set_status("completed", message="Convergence samples saved")
+            candidate = deepcopy(config)
+            if kind == "resolution": candidate["numerics"]["broadband_resolution"] = int(value)
+            elif kind == "domain": candidate["numerics"]["padding_um"] = value
+            else:
+                profile = _profile(config)
+                candidate["numerics"].update(minimum_run_time=float(profile["minimum_run_time"])*value,
+                                              maximum_run_time=float(profile["maximum_run_time"])*value,
+                                              dft_decay_tolerance=float(profile["dft_decay_tolerance"])/value)
+            run_identity = config_hash({"config": candidate, "validation_directory": str(output), "kind": kind, "value": value})[:10]
+            candidate["simulation_name"] = f"{safe_simulation_name(config['simulation_name'])[:40]}_{kind}_{value:g}_{run_identity}"
+            digest = config_hash(candidate)
+            runroot = output / "numerical_runs" / kind
+            target = runroot / safe_simulation_name(candidate["simulation_name"])
+            saved = target / "comparison_samples.npz"
+            marker = target / "comparison_signature.json"
+            signature = {"config_hash": digest, "sample_x_um": points.tolist()}
+            if saved.is_file() and marker.is_file() and json.loads(marker.read_text()) == signature:
+                with np.load(saved) as archive:
+                    wavelengths, response = archive["wavelengths"], archive["fields"]
+                sources.append("saved_convergence_samples")
+            else:
+                workspace = ExperimentWorkspace.create(candidate["simulation_name"], candidate, results_root=runroot, resume=target.exists())
+                _, actual, reference, _ = run_broadband_stage(candidate, workspace, cache_enabled=cache_enabled)
+                response = _sample_response(actual, reference, candidate, points)
+                wavelengths = actual.wavelengths_um * 1000
+                np.savez_compressed(saved, wavelengths=wavelengths, fields=response)
+                _write_json(marker, signature)
+                workspace.set_status("completed", message="Convergence samples saved")
+                sources.append("new_simulation")
         order = np.argsort(wavelengths)
         profiles.append((value, wavelengths[order], response[order]))
-    _, ref_wave, ref_field = profiles[-1]
-    ref_response = np.sqrt(np.mean(np.abs(ref_field)**2, axis=(1,2)))
-    for value, wave, field in profiles:
-        if wave.shape != ref_wave.shape or not np.allclose(wave, ref_wave):
-            raise ValidationError("Convergence cases have different frequency grids.")
-        response = np.sqrt(np.mean(np.abs(field)**2, axis=(1,2)))
-        peak, refpeak = _peak(wave, response), _peak(wave, ref_response)
-        records.append({"value": value, "complex_field_relative_l2_change": _nrmse(field, ref_field),
-                        "relative_peak_wavelength_change": abs(peak["wavelength_nm"]-refpeak["wavelength_nm"])/refpeak["wavelength_nm"],
-                        "peak_resolved": peak["status"] == refpeak["status"] == "resolved_sampled_peak",
-                        "relative_peak_amplitude_change": float(abs(np.max(response)-np.max(ref_response))/max(np.max(ref_response), 1e-30))})
+        if kind == "resolution" and adaptive_resolution and len(profiles) >= 2:
+            if _convergence_passed(_convergence_metrics(profiles[-2], profiles[-1])):
+                break
+    records = [_convergence_metrics(profile, profiles[-1]) for profile in profiles]
+    for record, source in zip(records, sources):
+        record["source"] = source
     last = records[-2]
-    passed = last["complex_field_relative_l2_change"] is not None and last["complex_field_relative_l2_change"] <= 0.05 and last["relative_peak_wavelength_change"] <= 0.02 and last["relative_peak_amplitude_change"] <= 0.05 and last["peak_resolved"]
+    passed = _convergence_passed(last)
     report = {"status": "completed", "convergence_status": "passed" if passed else "failed_or_unresolved",
-              "kind": kind, "values": values, "finest_comparison": last,
+              "kind": kind, "planned_values": values, "values": [p[0] for p in profiles],
+              "stopped_early": len(profiles) < len(values), "finest_comparison": last,
+              "recommended_resolution": int(profiles[-1][0]) if kind == "resolution" and passed else None,
               "criteria": {"complex_field_change": 0.05, "peak_wavelength_change": 0.02, "peak_amplitude_change": 0.05},
               "sample_count": len(points), "common_physical_sample_points": True}
     _write_csv(output / f"{kind}_convergence.csv", records)
@@ -407,7 +449,7 @@ def _convergence(config, experiment, output, kind, values, cache_enabled):
 def run_validation(experiment: str | Path, *, validation_name="notes_validation_v1",
                    checks: Sequence[str] = ("configuration", "theory"), results_root=None,
                    resolutions=None, paddings_um=None, time_factors=None, cache_enabled=True,
-                   tolerance=0.05, peak_tolerance=0.02) -> Path:
+                   tolerance=0.05, peak_tolerance=0.02, adaptive_resolution=True) -> Path:
     directory = resolve_experiment(experiment, results_root)
     config = normalise_project_config(json.loads((directory / "config_resolved.json").read_text(encoding="utf-8")))
     selected = {str(v).strip().lower() for v in checks}
@@ -418,14 +460,15 @@ def run_validation(experiment: str | Path, *, validation_name="notes_validation_
     if not (0 < tolerance < 1 and 0 < peak_tolerance < 1):
         raise ValidationError("Tolerances must be fractions between 0 and 1.")
     profile = _profile(config)
-    resolutions = list(resolutions) if resolutions is not None else [int(profile["broadband_resolution"]*f) for f in (0.75, 1, 1.25)]
-    paddings_um = list(paddings_um) if paddings_um is not None else [config["numerics"]["padding_um"]+v for v in (0, 0.1, 0.2)]
-    time_factors = list(time_factors) if time_factors is not None else [1, 1.5, 2]
-    identity = {"schema": "electrostatic_notes_v1", "config": config, "checks": sorted(selected),
+    resolutions = list(resolutions) if resolutions is not None else [int(profile["broadband_resolution"])+v for v in (0, 40, 80)]
+    paddings_um = list(paddings_um) if paddings_um is not None else [config["numerics"]["padding_um"]+v for v in (0, 0.1)]
+    time_factors = list(time_factors) if time_factors is not None else [1, 2]
+    identity = {"schema": "electrostatic_notes_v2", "config": config, "checks": sorted(selected),
                 "resolutions": resolutions if "resolution" in selected else None,
                 "paddings": paddings_um if "domain" in selected else None,
                 "time_factors": time_factors if "time" in selected else None,
-                "tolerance": tolerance, "peak_tolerance": peak_tolerance}
+                "tolerance": tolerance, "peak_tolerance": peak_tolerance,
+                "adaptive_resolution": bool(adaptive_resolution) if "resolution" in selected else None}
     output = directory / "validation" / safe_simulation_name(validation_name)
     marker = output / "validation_config.json"
     if output.exists() and (not marker.is_file() or json.loads(marker.read_text(encoding="utf-8")) != identity):
@@ -436,7 +479,7 @@ def run_validation(experiment: str | Path, *, validation_name="notes_validation_
     if "configuration" in selected: reports["configuration"] = _configuration_check(config, output)
     if "theory" in selected: reports["theory"] = _theory_check(config, directory, output, tolerance=tolerance, peak_tolerance=peak_tolerance)
     for kind, values in (("resolution", resolutions), ("domain", paddings_um), ("time", time_factors)):
-        if kind in selected: reports[kind] = _convergence(config, directory, output, kind, values, cache_enabled)
+        if kind in selected: reports[kind] = _convergence(config, directory, output, kind, values, cache_enabled, adaptive_resolution=adaptive_resolution)
     theory = reports.get("theory", {})
     numerical_pass = all(reports.get(k, {}).get("convergence_status") == "passed" for k in ("resolution", "domain", "time"))
     model_pass = theory.get("agreement_status") == "passed" and theory.get("applicability_status") == "passed"
