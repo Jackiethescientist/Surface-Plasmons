@@ -1,0 +1,49 @@
+{
+  "simulation_name": "notes_single_sphere",
+  "precision": "final",
+  "geometry": {
+    "particle_shape": "sphere",
+    "particle_count": 1,
+    "particle_material": "au",
+    "background_material": "air",
+    "substrate_material": "air",
+    "particle_radius_um": 0.003,
+    "spacing_um": 0.01,
+    "substrate_thickness_um": 0.02,
+    "surface_y_um": 0.0,
+    "particle_surface_gap_um": 0.0,
+    "defects": []
+  },
+  "source": {
+    "wavelength_range_nm": [
+      480.0,
+      650.0
+    ],
+    "propagation_axis": "y",
+    "propagation_direction": -1,
+    "polarisation": "Ex",
+    "span_pml": true
+  },
+  "measurement": {
+    "field_components": [
+      "Ex",
+      "Ey",
+      "Ez"
+    ],
+    "probe_margin_um": 0.0033,
+    "probe_line_y_um": 0.003,
+    "probe_offset_from_particle_surface_um": 0.0,
+    "normalization_mode": "global_complex_reference",
+    "field_map_frequencies": "none"
+  },
+  "numerics": {
+    "broadband_resolution": 3200,
+    "field_resolution": 3200,
+    "nfreq": 301,
+    "padding_um": 0.12,
+    "pml_thickness_um": 0.12,
+    "minimum_run_time": 30.0,
+    "maximum_run_time": 300.0,
+    "dft_decay_tolerance": 1e-08
+  }
+}

@@ -35,32 +35,7 @@ from surface_plasmons.workflow import WorkflowError, run_project
 
 DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "perfect_line.json" 
 
-THEORY_FORMULAS = {
-    "equation_1_quasistatic_sphere_polarizability": (
-        "alpha_0 = 4*pi*epsilon_b*a^3*(epsilon_p-epsilon_b)/(epsilon_p+2*epsilon_b)"
-    ),
-    "radiation_reaction_polarizability": (
-        "alpha_RR = alpha_0/[1-i*k^3*alpha_0/(6*pi*epsilon_b)]"
-    ),
-    "equation_2_coupled_dipoles": (
-        "E_loc,i = E0*exp(i*k.r_i) - sum_(j!=i) A_ij.P_j; P_i = alpha_i*E_loc,i"
-    ),
-    "equation_3_longitudinal_1d": (
-        "A_L(r) = -2*exp(i*k*r)*(1-i*k*r)/(4*pi*epsilon_b*r^3)"
-    ),
-    "equation_3_transverse_1d": (
-        "A_T(r) = exp(i*k*r)*[(1-i*k*r)/r^3-k^2/r]/(4*pi*epsilon_b)"
-    ),
-    "equation_4_uniform_chain": "P = E0/(1/alpha-S)",
-    "equation_5_finite_symmetric_sum": "S = -2*sum_(n=1..N) A(n*d)",
-    "mie_electric_dipole_polarizability": (
-        "alpha_Mie,a1 = 6*pi*i*epsilon_b*a1/k^3"
-    ),
-    "exact_mie_cross_sections": (
-        "C_ext=(2*pi/k^2)*sum_n(2n+1)Re(a_n+b_n); "
-        "C_sca=(2*pi/k^2)*sum_n(2n+1)(|a_n|^2+|b_n|^2); C_abs=C_ext-C_sca"
-    ),
-}
+from surface_plasmons.notes_theory import FORMULAS as THEORY_FORMULAS
 
 
 def _duration(seconds: float) -> str:
@@ -122,58 +97,28 @@ def _write_automatic_validation_file(
         for path in validation_directory.rglob("*")
         if path.is_file()
     )
-    hierarchy_rows = _read_csv_records(
-        validation_directory / "model_hierarchy_spectrum.csv"
-    )
-    particle_rows = _read_csv_records(
-        validation_directory / "one_dimensional_particle_response.csv"
-    )
-    equation2_rows = _read_csv_records(
-        validation_directory / "equation2_external_field_comparison.csv"
-    )
-    equation2_particles = _read_csv_records(
-        validation_directory / "equation2_particle_solution.csv"
-    )
-    agreement_values = [
-        reports.get("theory", {}).get("agreement_status"),
-        reports.get("hierarchy", {}).get("agreement_status"),
-    ]
-    if "failed" in agreement_values:
-        overall_status = "failed_model_agreement"
-    elif any(value == "passed_qualitative_only" for value in agreement_values):
-        overall_status = "provisional_qualitative_agreement_requires_convergence"
-    else:
-        overall_status = "provisional_requires_resolution_and_domain_convergence"
+    theory = reports.get("theory", {})
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "simulation_name": config["simulation_name"],
-        "simulation_directory": str(simulation_directory),
+        "simulation_variables": config,
+        "overall_validation_status": theory.get("overall_status", "not_validated"),
         "validation_scope": {
-            "automatic_checks": ["configuration", "theory", "hierarchy", "time"],
+            "automatic_checks": ["configuration", "theory"],
             "uses_existing_meep_results": True,
             "starts_additional_meep_runs": False,
-            "manual_checks_not_run": ["resolution", "domain"],
+            "manual_checks_not_run": ["resolution", "domain", "time"],
         },
-        "overall_validation_status": overall_status,
-        "simulation_variables": config,
         "derived_geometry": {
-            "nominal_particle_count": int(config["geometry"]["particle_count"]),
             "active_particle_count": len(active_particles),
             "particle_positions_um": [particle.to_dict() for particle in active_particles],
-            "defects": config["geometry"].get("defects", []),
         },
         "theory_formulas": THEORY_FORMULAS,
-        "formula_substitutions_and_model_results_by_wavelength": hierarchy_rows,
-        "one_dimensional_particle_results": particle_rows,
-        "equation2_external_field_comparison_at_selected_wavelength": equation2_rows,
-        "equation2_particle_solution_at_selected_wavelength": equation2_particles,
+        "formula_substitutions_and_model_results_by_wavelength": _read_csv_records(validation_directory / "notes_spectrum.csv"),
+        "dipole_diagnostics": _read_csv_records(validation_directory / "notes_dipoles.csv"),
+        "pair_mode_predictions": _read_csv_records(validation_directory / "notes_pair_modes.csv"),
         "validation_reports": reports,
         "generated_validation_files": generated_files,
-        "interpretation": (
-            "Each per-wavelength row contains the numerical inputs substituted into the "
-            "listed formulas, their theory outputs, and the matching MEEP result. Empty "
-            "Equation-4/5 values mean the identical perfect-chain assumption did not apply."
-        ),
     }
     destination = simulation_directory / "automatic_theory_validation.json"
     destination.write_text(
@@ -202,7 +147,7 @@ def parse_args() -> Any:
     parser.add_argument(
         "--skip-validation",
         action="store_true",
-        help="Skip automatic read-only configuration, Equation-2, 1-D and Mie validation.",
+        help="Skip automatic read-only validation against the electrostatic notes.",
     )
     parser.add_argument(
         "--validation-name",
@@ -269,14 +214,12 @@ def main() -> None:
     except (ProjectConfigError, ResultsError, WorkflowError, RuntimeError, ValueError) as exc:
         raise SystemExit(f"Simulation failed: {exc}") from exc
     if not args.skip_validation:
-        validation_name = _available_validation_name(
-            workspace.directory, args.validation_name
-        )
+        validation_name = args.validation_name
         try:
             validation_directory = run_validation(
                 workspace.directory,
                 validation_name=validation_name,
-                checks=("configuration", "theory", "hierarchy", "time"),
+                checks=("configuration", "theory"),
             )
             automatic_file = _write_automatic_validation_file(
                 workspace.directory,
@@ -303,3 +246,4 @@ if __name__ == "__main__":
         sys.argv.append("--dry-run")
 
     main()
+

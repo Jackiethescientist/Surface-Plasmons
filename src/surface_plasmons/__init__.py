@@ -151,7 +151,7 @@ from .visualization import (
 )
 from .workflow import StageFields, WorkflowError, load_stage_fields, run_project
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 __all__ = [
     "DEFAULT_STYLE",
@@ -293,3 +293,4 @@ __all__ = [
     "resolve_experiment",
     "ExperimentWorkspace",
 ]
+

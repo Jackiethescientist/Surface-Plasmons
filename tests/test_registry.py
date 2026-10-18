@@ -8,7 +8,7 @@ from surface_plasmons.materials import get_material_spec, list_materials
 
 
 def test_release_version_and_public_exports() -> None:
-    assert sp.__version__ == "0.4.0"
+    assert sp.__version__ == "0.4.1"
     assert callable(sp.run_simulation)
     assert callable(sp.run_sweep)
     assert callable(sp.analyze_spectrum)
@@ -37,3 +37,4 @@ def test_geometry_registry_and_parameter_validation() -> None:
         },
     )
     assert parameters["radius"] == 0.04
+

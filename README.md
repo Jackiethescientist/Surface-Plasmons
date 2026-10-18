@@ -24,7 +24,7 @@ use nanometres only where the field name explicitly ends in `_nm`.
 - Substrate-only reference calculations with compatible-result caching.
 - One named result folder per physical simulation.
 - A separate validation runner for a user-selected simulation.
-- Numerical resolution/domain checks and a same-scale Equation-2 coupled-dipole comparison.
+- Numerical resolution/domain/time checks and formula-only electrostatic comparisons.
 - `fast`, `study` and `final` precision modes (`sweep` remains a legacy alias for `study`).
 - Runtime and memory estimates before each expensive stage.
 
@@ -187,7 +187,7 @@ F_E(r,f) = sqrt(|Ex/Eref|² + |Ey/Eref|² + |Ez/Eref|²)
 ```
 
 All component maps, total-field maps, spectra, summaries, peak selection and
-Equation-2 validation use this unsquared amplitude ratio. The legacy
+validation use this unsquared amplitude ratio. The legacy
 `total_field_enhancement` name is retained for compatibility but now also means
 `F_E`. Full-volume maps use the matching particle-free field amplitude at each
 point. The reference keeps the substrate and removes only the particles;
@@ -195,73 +195,30 @@ compatible references are reused across configurations.
 
 ## Validation
 
-Validation never runs automatically for every result. Select one simulation:
+Validation now compares only the updated electrostatic notes: sphere
+polarizability, signed axial/transverse dipole fields, and static coupled
+particles. Follow [VALIDATION_SEQUENCE.md](VALIDATION_SEQUENCE.md) for the full
+sequence, equations, tolerances and output definitions.
 
 ```bash
-python scripts/run_validation.py \
-  --simulation perfect_line_n9_spacing150nm \
-  --name quick_validation_v1
+python scripts/run_notes_sequence.py --dry-run
+python scripts/run_notes_sequence.py --stage single
+python scripts/run_notes_sequence.py --stage convergence --convergence-scope single
+python scripts/run_notes_sequence.py --stage pairs
+python scripts/run_notes_sequence.py --stage convergence --convergence-scope pairs
+python scripts/run_notes_sequence.py --stage summary
 ```
 
-The default `configuration,theory` checks read existing data and are fast. Runs
-created before version 0.3.1 must be rerun because their CSV files do not contain
-the normalized complex vector field required for a same-scale comparison.
-Resolution and domain convergence start additional MEEP calculations:
+Identical reruns reuse results. Model comparison uses complex scattered fields
+without independent rescaling. Only homogeneous sphere configurations qualify
+for this theory check. The numerical resolution, domain and time checks each
+perform additional calculations. Both pair eigenmodes are predicted; uniform
+illumination tests only the symmetric mode.
 
-```bash
-python scripts/run_validation.py \
-  --simulation perfect_line_n9_spacing150nm \
-  --name final_validation_v1 \
-  --checks configuration,theory,resolution,domain,time
-```
-
-Custom numerical values can be supplied:
-
-```bash
---resolutions 60,80,100
---paddings 0.30,0.40
-```
-
-Validation results remain inside the selected simulation's `validation` folder.
-Use a new validation name for every attempt.
-
-## Theory scope
-
-`surface_plasmons.theory` implements the paper's complex vector equation
-
-```text
-E_loc,i = E0 exp(i k.r_i) - sum_(j != i) A_ij.P_j,
-P_i = alpha_i E_loc,i.
-```
-
-The interaction approximation must now be selected explicitly. `quasistatic`
-uses only the electrostatic `1/r^3` tensor. `paper_retarded` implements the
-paper's Equation 3, including its `1/r^3`, `1/r^2`, `1/r`, phase, and sign
-terms. In both cases `A_ij = -G_ij`, so the paper's `-A_ij.P_j` is the physical
-dipole field `+G_ij.P_j`.
-
-The Equation-2 validation uses the paper's retarded Equation-3 interaction
-together with the quasistatic Equation-1 sphere polarizability. Radiation
-reaction is a separate, explicitly selected polarizability model and is not
-silently enabled by supplying a wavelength. See
-[`EQUATION_2_MODEL_NOTES.md`](EQUATION_2_MODEL_NOTES.md) for the equations,
-units, inferred time convention, and independent checks.
-
-The solver includes the incident phase and all Cartesian dipole components.
-Validation evaluates the solved dipoles at the exact external MEEP sample
-points, compares the complex fields on one common scale, and reports the
-Equation-2 residual.
-
-Start with the optically homogeneous
-`configs/equation2_perfect_line_homogeneous.json` case. For configurations with
-a substrate, validation adds a simple electrostatic image-dipole correction and
-labels it as an approximation rather than claiming that it is the exact
-homogeneous-medium Equation 2.
-
-This baseline is deliberately limited: it does not contain the full retarded
-substrate dyadic Green tensor, dynamic depolarization inside a finite particle,
-or higher multipoles. Those limitations are part of the research question
-rather than being hidden.
+`run_single.py` automatically compares the saved fields to these formulas unless
+`--skip-validation` is supplied. That automatic comparison does not run the
+extra numerical convergence cases. The previous `hierarchy` check is removed.
+General theory APIs remain available for compatibility.
 
 ## Generic sweeps
 
@@ -290,7 +247,8 @@ is still essential and is not the same as a parameter sweep.
 | `simulation` | MEEP construction, execution and multi-frequency vector fields |
 | `workflow` | Broadband/reference/narrowband orchestration and labelled outputs |
 | `results` | Safe one-folder storage, manifests and status |
-| `theory` | Coupled-dipole baseline and profile comparison |
+| `theory` | General coupled-dipole and scattering APIs |
+| `notes_theory` | Only the electrostatic equations in the validation notes |
 | `validation` | Selected-simulation theory and convergence checks |
 | `materials` | Material registry and complex dielectric-function evaluation |
 | `database` | Internal run-stage metadata and artifacts |
@@ -298,3 +256,4 @@ is still essential and is not the same as a parameter sweep.
 ## License
 
 MIT. See `LICENSE`.
+

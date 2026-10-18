@@ -185,6 +185,10 @@ def normalise_project_config(
         raise ProjectConfigError(
             "measurement.probe_offset_from_particle_surface_um cannot be negative."
         )
+    if "probe_line_y_um" in measurement:
+        value = measurement["probe_line_y_um"]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise ProjectConfigError("measurement.probe_line_y_um must be finite.")
     if measurement["normalization_mode"] not in {
         "global_complex_reference", "pointwise_amplitude_reference"
     }:
@@ -192,6 +196,25 @@ def normalise_project_config(
             "measurement.normalization_mode must be global_complex_reference or "
             "pointwise_amplitude_reference."
         )
+    # Per-experiment overrides keep convergence runs reproducible without
+    # changing global precision presets in this Python process.
+    numerics = result["numerics"]
+    for key in ("broadband_resolution", "field_resolution", "nfreq",
+                "minimum_run_time", "maximum_run_time", "dft_decay_tolerance"):
+        if key in numerics:
+            value = numerics[key]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+                raise ProjectConfigError(f"numerics.{key} must be finite and positive.")
+            if key in {"broadband_resolution", "field_resolution", "nfreq"} and int(value) != value:
+                raise ProjectConfigError(f"numerics.{key} must be an integer.")
+    profile = {**PRECISION_MODES[result["precision"]], **numerics}
+    if float(profile["maximum_run_time"]) <= float(profile["minimum_run_time"]):
+        raise ProjectConfigError("maximum_run_time must exceed minimum_run_time.")
+    for key in ("padding_um", "pml_thickness_um"):
+        if not math.isfinite(float(numerics[key])) or float(numerics[key]) <= 0:
+            raise ProjectConfigError(f"numerics.{key} must be finite and positive.")
+    if not isinstance(source.get("span_pml", False), bool):
+        raise ProjectConfigError("source.span_pml must be a boolean.")
     return result
 
 
@@ -241,6 +264,7 @@ def _monitor_geometry(config: Mapping[str, Any], *, full_volume: bool) -> tuple[
         probe_y = max(item.actual_y_um + half_height for item in positions) + float(
             measurement["probe_offset_from_particle_surface_um"]
         )
+        probe_y = float(measurement.get("probe_line_y_um", probe_y))
         centre = [0.5 * (min_x + max_x), probe_y, 0.0]
         size = [max_x - min_x + 2.0 * margin, 0.0, 0.0]
         return centre, size
@@ -270,7 +294,7 @@ def make_simulation_config(
     padding_um: float | None = None,
 ) -> dict[str, Any]:
     config = normalise_project_config(project_config)
-    profile = PRECISION_MODES[config["precision"]]
+    profile = {**PRECISION_MODES[config["precision"]], **config["numerics"]}
     is_broadband = wavelength_um is None
     selected_resolution = int(
         resolution
@@ -318,6 +342,8 @@ def make_simulation_config(
             "direction": int(source["propagation_direction"]),
             "component": source["polarisation"],
             "wavelength_range_um": wavelength_band,
+            "span_pml": bool(source.get("span_pml", False)),
+            "offset_from_pml_um": float(source.get("offset_from_pml_um", 0.05)),
         },
         "flux": {"enabled": False, "nfreq": 1, "normalization": "none"},
         "output": {
@@ -375,3 +401,4 @@ __all__ = [
     "make_simulation_config",
     "normalise_project_config",
 ]
+

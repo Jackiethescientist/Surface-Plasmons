@@ -49,6 +49,7 @@ class SourceConfig:
     offset_from_pml_um: float = 0.05
     cutoff: float = 5.0
     is_integrated: bool = True
+    span_pml: bool = False
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any] | None) -> "SourceConfig":
@@ -72,6 +73,10 @@ class SourceConfig:
 
     def validate(self) -> None:
         self.wavelength_range_um = _normalise_band(self.wavelength_range_um)
+        if not isinstance(self.span_pml, bool):
+            raise SimulationConfigError("source.span_pml must be a boolean.")
+        if self.span_pml and not self.is_integrated:
+            raise SimulationConfigError("A plane source spanning PML requires is_integrated=True.")
         if self.kind not in {"gaussian", "continuous", "dipole"}:
             raise SimulationConfigError("source.kind must be gaussian, continuous, or dipole.")
         if self.axis is not None and self.axis.lower() not in {"x", "y", "z"}:
@@ -779,7 +784,7 @@ def _build_source(
         size_values[_AXIS_INDEX[axis]] = 0.0
         for candidate in ("x", "y", "z"):
             index = _AXIS_INDEX[candidate]
-            if candidate in pml_axes and size_values[index] > 0:
+            if candidate in pml_axes and size_values[index] > 0 and not cfg.source.span_pml:
                 size_values[index] = max(0.0, size_values[index] - 2 * cfg.pml_thickness_um)
         if cfg.dimensions == 2:
             size_values[2] = 0.0
@@ -1376,3 +1381,4 @@ __all__ = [
     "simulate",
     "validate_config",
 ]
+

@@ -668,11 +668,11 @@ def _save_broadband_plots(
             wavelengths[wavelength_order],
             amplitude_enhancement[wavelength_order, index],
             linewidth=1.3,
-            label=f"Above particle {item.particle_index}",
+            label=f"At particle x: {item.particle_index}" if "probe_line_y_um" in project_config["measurement"] else f"Above particle {item.particle_index}",
         )
     axis.set_xlabel("Wavelength (nm)")
     axis.set_ylabel(r"Field-amplitude ratio, $|E|/|E_{\mathrm{ref}}|$")
-    axis.set_title("External field response sampled above each particle")
+    axis.set_title("Field response at particle x positions" if "probe_line_y_um" in project_config["measurement"] else "External field response sampled above each particle")
     axis.grid(alpha=0.22)
     axis.legend(ncol=3, fontsize=8, frameon=False)
     figure.tight_layout()
@@ -1021,3 +1021,4 @@ __all__ = [
     "run_broadband_stage",
     "run_project",
 ]
+
