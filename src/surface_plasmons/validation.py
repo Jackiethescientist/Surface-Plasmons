@@ -366,6 +366,28 @@ def _saved_baseline_samples(raw, points):
     return wavelengths, np.asarray(responses)
 
 
+def _cached_samples(saved, marker, signature):
+    """Reuse earlier samples when the requested safe points are a subset."""
+    if not saved.is_file() or not marker.is_file():
+        return None
+    previous = json.loads(marker.read_text(encoding="utf-8"))
+    if previous.get("config_hash") != signature["config_hash"]:
+        return None
+    old_points = np.asarray(previous.get("sample_x_um", []), dtype=float)
+    points = np.asarray(signature["sample_x_um"], dtype=float)
+    if not old_points.size:
+        return None
+    indices = np.argmin(np.abs(old_points[:, None] - points[None, :]), axis=0)
+    if not np.allclose(old_points[indices], points, rtol=0, atol=1e-12):
+        return None
+    with np.load(saved, allow_pickle=False) as archive:
+        wavelengths = np.array(archive["wavelengths"])
+        fields = np.array(archive["fields"])
+    if fields.ndim != 3 or fields.shape[1] != len(old_points):
+        raise ValidationError(f"Invalid cached convergence samples: {saved}")
+    return wavelengths, fields[:, indices, :]
+
+
 def _convergence(config, experiment, output, kind, values, cache_enabled, *, adaptive_resolution=True):
     from .workflow import run_broadband_stage
     if config["measurement"]["normalization_mode"] != "global_complex_reference":
@@ -386,6 +408,13 @@ def _convergence(config, experiment, output, kind, values, cache_enabled, *, ada
     coarse_res = min(values) if kind == "resolution" else base_res
     distance = np.linalg.norm(original_points[:,None,:] - _positions(config)[None,:,:], axis=2)
     keep = np.all(distance >= float(config["geometry"]["particle_radius_um"]) + 2/coarse_res, axis=1)
+    # Monitor endpoints can move when MEEP rounds different grids to cells.
+    # Keep the same interior coordinates for every run; never extrapolate.
+    edge_buffer_um = 2.0 / coarse_res
+    x_min = float(np.min(original_points[:, 0])) + edge_buffer_um
+    x_max = float(np.max(original_points[:, 0])) - edge_buffer_um
+    keep &= (original_points[:, 0] >= x_min - 1e-12)
+    keep &= (original_points[:, 0] <= x_max + 1e-12)
     points = original_points[keep, 0]
     if len(points) < 4:
         raise ValidationError("Too few common exterior points for convergence; extend the monitor.")
@@ -412,9 +441,9 @@ def _convergence(config, experiment, output, kind, values, cache_enabled, *, ada
             saved = target / "comparison_samples.npz"
             marker = target / "comparison_signature.json"
             signature = {"config_hash": digest, "sample_x_um": points.tolist()}
-            if saved.is_file() and marker.is_file() and json.loads(marker.read_text()) == signature:
-                with np.load(saved) as archive:
-                    wavelengths, response = archive["wavelengths"], archive["fields"]
+            cached = _cached_samples(saved, marker, signature)
+            if cached is not None:
+                wavelengths, response = cached
                 sources.append("saved_convergence_samples")
             else:
                 workspace = ExperimentWorkspace.create(candidate["simulation_name"], candidate, results_root=runroot, resume=target.exists())
@@ -440,7 +469,8 @@ def _convergence(config, experiment, output, kind, values, cache_enabled, *, ada
               "stopped_early": len(profiles) < len(values), "finest_comparison": last,
               "recommended_resolution": int(profiles[-1][0]) if kind == "resolution" and passed else None,
               "criteria": {"complex_field_change": 0.05, "peak_wavelength_change": 0.02, "peak_amplitude_change": 0.05},
-              "sample_count": len(points), "common_physical_sample_points": True}
+              "sample_count": len(points), "common_physical_sample_points": True,
+              "monitor_edge_buffer_um": edge_buffer_um, "sample_x_um": points.tolist()}
     _write_csv(output / f"{kind}_convergence.csv", records)
     _write_json(output / f"{kind}_convergence_summary.json", report)
     return report
