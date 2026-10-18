@@ -7,8 +7,8 @@
     "particle_material": "au",
     "background_material": "air",
     "substrate_material": "air",
-    "particle_radius_um": 0.003,
-    "spacing_um": 0.01,
+    "particle_radius_um": 0.04,
+    "spacing_um": 0.12,
     "substrate_thickness_um": 0.02,
     "surface_y_um": 0.0,
     "particle_surface_gap_um": 0.0,
@@ -30,20 +30,20 @@
       "Ey",
       "Ez"
     ],
-    "probe_margin_um": 0.0033,
-    "probe_line_y_um": 0.003,
+    "probe_margin_um": 0.075,
+    "probe_line_y_um": 0.04,
     "probe_offset_from_particle_surface_um": 0.0,
     "normalization_mode": "global_complex_reference",
     "field_map_frequencies": "none"
   },
   "numerics": {
-    "broadband_resolution": 3200,
-    "field_resolution": 3200,
-    "nfreq": 301,
+    "broadband_resolution": 80,
+    "field_resolution": 80,
+    "nfreq": 61,
     "padding_um": 0.12,
     "pml_thickness_um": 0.12,
-    "minimum_run_time": 30.0,
-    "maximum_run_time": 300.0,
-    "dft_decay_tolerance": 1e-08
+    "minimum_run_time": 20.0,
+    "maximum_run_time": 100.0,
+    "dft_decay_tolerance": 1e-05
   }
 }
