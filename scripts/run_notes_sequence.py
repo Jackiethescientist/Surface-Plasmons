@@ -123,7 +123,7 @@ def write_summary(root, entries, prefix):
 def main():
     parser = ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path(__file__).resolve().parents[1]/"configs/notes_single_sphere.json")
-    parser.add_argument("--name", default="electrostatic_notes_v2", help="Prefix for all cases; reuse for an identical restart.")
+    parser.add_argument("--name", default="electrostatic_notes_v3", help="Prefix for all cases; reuse for an identical restart.")
     parser.add_argument("--stage", choices=("single", "pairs", "convergence", "summary", "all"), default="single")
     parser.add_argument("--convergence-scope", choices=("single", "pairs", "all"), default="single")
     parser.add_argument("--results-root", type=Path)

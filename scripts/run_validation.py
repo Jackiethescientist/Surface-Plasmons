@@ -16,7 +16,7 @@ def _numbers(value, cast=float):
 def main():
     parser = ArgumentParser(description=__doc__)
     parser.add_argument("--simulation", required=True)
-    parser.add_argument("--name", default="notes_validation_v1")
+    parser.add_argument("--name", default="notes_validation_v2")
     parser.add_argument("--checks", default="configuration,theory", help="configuration,theory,resolution,domain,time or all")
     parser.add_argument("--results-root", type=Path)
     parser.add_argument("--resolutions")
