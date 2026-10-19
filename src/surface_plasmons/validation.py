@@ -70,6 +70,8 @@ def _configuration_check(config, output):
     resolution = int(_profile(config)["broadband_resolution"])
     report = {"status": "passed", "particle_count": len(positions),
               "resolution_pixels_per_um": resolution, "cells_across_diameter": 2*radius*resolution,
+              "precision_label": config["precision"],
+              "resolution_from_explicit_override": "broadband_resolution" in config["numerics"],
               "note": "Configuration validity does not establish numerical convergence."}
     _write_json(output / "configuration_validation.json", report)
     return report
@@ -112,6 +114,28 @@ def _peak(wavelengths, values):
             "sampling_uncertainty_nm": float(spacing / 2)}
 
 
+def _validation_region(config):
+    region = config["measurement"].get("validation_region", "all_exterior")
+    if region not in {"all_exterior", "electrostatic_near_zone"}:
+        raise ValidationError("measurement.validation_region must be all_exterior or electrostatic_near_zone.")
+    return region
+
+
+def _maximum_host_k(dielectric, wavelengths):
+    return max(float(abs(2*np.pi*np.sqrt(_epsilon(dielectric, "background", wave))/(wave/1000))) for wave in wavelengths)
+
+
+def _applicability_details(spectra, reference_error, tolerance):
+    values = {"particle_size_ka": max(r["ka"] for r in spectra),
+              "probe_distance_kr": max(r["maximum_probe_to_particle_kr"] for r in spectra),
+              "particle_separation_kd": max(r["maximum_particle_separation_kr"] for r in spectra),
+              "reference_plane_wave_relative_error": reference_error}
+    checks = {name: {"value": value, "limit": tolerance if name.startswith("reference_") else .3,
+                     "status": "passed" if value <= (tolerance if name.startswith("reference_") else .3) else "failed"}
+              for name, value in values.items()}
+    return checks, [name for name, check in checks.items() if check["status"] == "failed"]
+
+
 def _theory_check(config, experiment, output, *, tolerance=0.05, peak_tolerance=0.02):
     geometry = config["geometry"]
     if geometry["particle_shape"] != "sphere":
@@ -134,6 +158,8 @@ def _theory_check(config, experiment, output, *, tolerance=0.05, peak_tolerance=
             report = {"status": "skipped", "reason": "The notes require a homogeneous, lossless positive dielectric host. No substrate correction is added."}
             _write_json(output / "notes_validation.json", report)
             return report
+    region = _validation_region(config)
+    maximum_k = _maximum_host_k(dielectric, wavelengths)
     positions = _positions(config)
     radius = float(geometry["particle_radius_um"])
     resolution = int(_profile(config)["broadband_resolution"])
@@ -151,7 +177,18 @@ def _theory_check(config, experiment, output, *, tolerance=0.05, peak_tolerance=
         points = np.asarray([[float(r[f"{c}_um"]) for c in "xyz"] for r in selected])
         distances = np.linalg.norm(points[:, None, :] - positions[None, :, :], axis=2)
         keep = np.all(distances >= minimum_distance, axis=1)
+        if region == "electrostatic_near_zone":
+            keep &= np.all(maximum_k * distances <= .3 + 1e-12, axis=1)
         if np.count_nonzero(keep) < max(4, len(positions) + 1):
+            if region == "electrostatic_near_zone":
+                report = {"status": "skipped", "agreement_status": "not_evaluated",
+                          "applicability_status": "insufficient_near_field_samples", "validation_region": region,
+                          "reason": "Too few exterior points satisfy both the two-cell surface buffer and kr <= 0.3 over the entire band.",
+                          "maximum_near_zone_distance_um": .3/maximum_k,
+                          "minimum_surface_safe_distance_um": minimum_distance,
+                          "note": "Use a smaller physical benchmark when the safe distance exceeds the near-zone radius. A higher resolution alone cannot fix an oversized particle."}
+                _write_json(output / "notes_validation.json", report)
+                return report
             raise ValidationError("Too few exterior field samples after the two-grid-cell surface buffer. Increase probe_margin_um or resolution.")
         total = _vectors(selected, "normalised_")[keep]
         reference = _vectors(selected, "normalised_reference_")[keep]
@@ -266,16 +303,47 @@ def _theory_check(config, experiment, output, *, tolerance=0.05, peak_tolerance=
     peak_resolved = all(p["status"] == "resolved_sampled_peak" for p in (measured_peak, predicted_peak))
     peak_sampling_sufficient = peak_resolved and all(p["sampling_uncertainty_nm"] / p["wavelength_nm"] <= peak_tolerance for p in (measured_peak, predicted_peak))
     peak_error = abs(measured_peak["wavelength_nm"] - predicted_peak["wavelength_nm"]) / predicted_peak["wavelength_nm"] if peak_resolved else None
-    error = _nrmse(np.concatenate(all_actual), np.concatenate(all_theory))
+    actual_vector = np.concatenate(all_actual).reshape(-1, 3)
+    theory_vector = np.concatenate(all_theory).reshape(-1, 3)
+    error = _nrmse(actual_vector, theory_vector)
+    amplitude_error = _nrmse(np.linalg.norm(actual_vector, axis=1), np.linalg.norm(theory_vector, axis=1))
     agreement = "passed" if error is not None and error <= tolerance and peak_error is not None and peak_error <= peak_tolerance and peak_sampling_sufficient else "failed"
     if not peak_sampling_sufficient and error is not None and error <= tolerance:
         agreement = "inconclusive_peak_not_resolved"
     reference_error = max(e for e in reference_errors if e is not None)
-    applicability = "passed" if max(near_parameters) <= 0.3 and reference_error <= tolerance else "outside_strict_electrostatic_regime_or_nonuniform_illumination"
+    applicability_checks, applicability_reasons = _applicability_details(spectra, reference_error, tolerance)
+    applicability = "passed" if not applicability_reasons else "outside_applicability_checks"
+    agreement_checks = {
+        "complex_scattered_field": {"value": error, "limit": tolerance,
+                                   "status": "passed" if error is not None and error <= tolerance else "failed"},
+        "peak_wavelength": {"value": peak_error, "limit": peak_tolerance,
+                            "status": "passed" if peak_error is not None and peak_error <= peak_tolerance else "failed_or_unresolved"},
+        "peak_sampling": {"status": "passed" if peak_sampling_sufficient else "unresolved"},
+    }
+    failure_reasons = [name for name, check in agreement_checks.items() if check["status"] != "passed"]
+    warnings = []
+    if 2*radius*resolution < 12:
+        warnings.append("The diameter has fewer than 12 grid cells. This is a coarse initial mesh; convergence is required and may need finer settings.")
+    if applicability_reasons:
+        warnings.append("An electrostatic model disagreement outside its applicability screen does not by itself show an FDTD solver error.")
     report = {"status": "completed", "model": "notes_electrostatic_only", "formulas": FORMULAS,
               "agreement_status": agreement, "applicability_status": applicability,
+              "agreement_checks": agreement_checks, "failure_reasons": failure_reasons,
+              "applicability_checks": applicability_checks, "applicability_failure_reasons": applicability_reasons,
+              "validation_region": region, "cells_across_particle_diameter": 2*radius*resolution,
+              "benchmark_recovery": {
+                  "maximum_near_zone_radius_um": .3/maximum_k,
+                  "minimum_surface_safe_probe_radius_um": minimum_distance,
+                  "sphere_fits_near_zone": bool(radius < .3/maximum_k),
+                  "surface_safe_near_zone_exists_at_saved_resolution": bool(minimum_distance < .3/maximum_k),
+                  "reanalysis_changes_original_radius_or_resolution": False,
+                  "action": "Run a new smaller-sphere configuration for a strict benchmark; retain these data as a model-disagreement case."
+                            if radius >= .3/maximum_k else "Check numerical convergence and whether the saved probes cover the near zone.",
+              },
+              "warnings": warnings,
               "overall_status": "provisional_agreement_requires_convergence" if agreement == "passed" and applicability == "passed" else "not_validated",
               "complex_scattered_field_relative_l2_error": error,
+              "amplitude_only_diagnostic_relative_l2_error": amplitude_error,
               "maximum_equation_relative_residual": max_residual,
               "maximum_reference_plane_wave_relative_error": reference_error,
               "maximum_ka_or_kr": max(near_parameters), "electrostatic_screening_limit": 0.3,
@@ -415,6 +483,10 @@ def _convergence(config, experiment, output, kind, values, cache_enabled, *, ada
     x_max = float(np.max(original_points[:, 0])) - edge_buffer_um
     keep &= (original_points[:, 0] >= x_min - 1e-12)
     keep &= (original_points[:, 0] <= x_max + 1e-12)
+    if _validation_region(config) == "electrostatic_near_zone":
+        dielectric = _read_csv(experiment / "frequency_scan/dielectric_function_vs_frequency.csv")
+        maximum_k = _maximum_host_k(dielectric, sorted({float(r["wavelength_nm"]) for r in raw}))
+        keep &= np.all(maximum_k * distance <= .3 + 1e-12, axis=1)
     points = original_points[keep, 0]
     if len(points) < 4:
         raise ValidationError("Too few common exterior points for convergence; extend the monitor.")
@@ -476,6 +548,52 @@ def _convergence(config, experiment, output, kind, values, cache_enabled, *, ada
     return report
 
 
+def _baseline_analysis_signature(config):
+    """Compare effective broadband settings, including their analysis region."""
+    from .project import make_simulation_config
+    resolved = normalise_project_config(config)
+    simulation = make_simulation_config(resolved, experiment_directory=Path.cwd()/"signature_only", stage_name="frequency_scan/particle")
+    for key in ("run_id", "run_name", "tags", "record_database"):
+        simulation.pop(key, None)
+    for key in ("experiment_directory", "stage_name"):
+        simulation["output"].pop(key, None)
+    return config_hash({"simulation": simulation,
+                        "normalization_mode": resolved["measurement"]["normalization_mode"],
+                        "validation_region": _validation_region(resolved)})
+
+
+def _saved_convergence_reports(directory, config, exclude):
+    """Read compatible completed checks; missing checks are not called unrun."""
+    expected = _baseline_analysis_signature(config)
+    reports = {}
+    root = directory/"validation"
+    markers = sorted(root.glob("*/validation_config.json"), key=lambda path:path.stat().st_mtime, reverse=True)
+    for marker in markers:
+        if marker.parent.resolve() == exclude.resolve():
+            continue
+        try:
+            identity = json.loads(marker.read_text(encoding="utf-8"))
+            baseline = identity.get("config")
+            if not isinstance(baseline, dict) or _baseline_analysis_signature(baseline) != expected:
+                continue
+            summary = json.loads((marker.parent/"validation_summary.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        for kind in ("resolution", "domain", "time"):
+            report = summary.get(kind, {})
+            if kind in reports or report.get("status") != "completed":
+                continue
+            if report.get("convergence_status") not in {"passed", "failed", "failed_or_unresolved"}:
+                continue
+            criteria = report.get("criteria", {})
+            required = {"complex_field_change": .05, "peak_wavelength_change": .02, "peak_amplitude_change": .05}
+            if any(not isinstance(criteria.get(key), (float, int)) or not 0 < criteria[key] <= limit for key, limit in required.items()):
+                continue
+            reports[kind] = {**report, "loaded_from_saved_results": True,
+                             "source_validation_folder": marker.parent.name}
+    return reports
+
+
 def run_validation(experiment: str | Path, *, validation_name="notes_validation_v1",
                    checks: Sequence[str] = ("configuration", "theory"), results_root=None,
                    resolutions=None, paddings_um=None, time_factors=None, cache_enabled=True,
@@ -505,11 +623,16 @@ def run_validation(experiment: str | Path, *, validation_name="notes_validation_
         raise ValidationError("This validation name belongs to different settings. Use a new --name; identical reruns reuse the same folder.")
     output.mkdir(parents=True, exist_ok=True)
     _write_json(marker, identity)
-    reports = {}
+    reports = _saved_convergence_reports(directory, config, output)
     if "configuration" in selected: reports["configuration"] = _configuration_check(config, output)
     if "theory" in selected: reports["theory"] = _theory_check(config, directory, output, tolerance=tolerance, peak_tolerance=peak_tolerance)
     for kind, values in (("resolution", resolutions), ("domain", paddings_um), ("time", time_factors)):
         if kind in selected: reports[kind] = _convergence(config, directory, output, kind, values, cache_enabled, adaptive_resolution=adaptive_resolution)
+    reports["numerical_check_availability"] = {
+        kind: {"status": "computed_in_this_analysis" if kind in selected else
+                         ("loaded_compatible_saved_check" if kind in reports else "not_requested_no_compatible_saved_report_found"),
+               "source_validation_folder": reports.get(kind, {}).get("source_validation_folder")}
+        for kind in ("resolution", "domain", "time")}
     theory = reports.get("theory", {})
     numerical_pass = all(reports.get(k, {}).get("convergence_status") == "passed" for k in ("resolution", "domain", "time"))
     model_pass = theory.get("agreement_status") == "passed" and theory.get("applicability_status") == "passed"
@@ -519,9 +642,26 @@ def run_validation(experiment: str | Path, *, validation_name="notes_validation_
     text = ["# Electrostatic notes validation", "", f"Overall: {reports['overall']['status']}", f"Model agreement: {theory.get('agreement_status', theory.get('status', 'not requested'))}",
             f"Applicability: {theory.get('applicability_status', theory.get('reason', 'not evaluated'))}",
             f"Complex scattered-field relative L2 error: {theory.get('complex_scattered_field_relative_l2_error', 'unavailable')}",
-            "", "Convergence:"]
+            f"Amplitude-only diagnostic relative L2 error: {theory.get('amplitude_only_diagnostic_relative_l2_error', 'unavailable')}",
+            "", "Individual model checks:"]
+    for key, check in theory.get("agreement_checks", {}).items():
+        text.append(f"- {key}: {check['status']} (value={check.get('value', 'n/a')}, limit={check.get('limit', 'n/a')})")
+    text.append("\nApplicability checks:")
+    for key, check in theory.get("applicability_checks", {}).items():
+        text.append(f"- {key}: {check['status']} (value={check['value']:.6g}, limit={check['limit']:.6g})")
+    text.append("\nConvergence:")
     for kind in ("resolution", "domain", "time"):
-        text.append(f"- {kind}: {reports.get(kind, {}).get('convergence_status', 'not run')}")
+        numerical = reports.get(kind, {})
+        status = numerical.get("convergence_status", "not requested in this reanalysis; no compatible saved report found")
+        source = numerical.get("source_validation_folder")
+        text.append(f"- {kind}: {status}" + (f" (saved report: {source})" if source else ""))
+    recovery = theory.get("benchmark_recovery", {})
+    if recovery:
+        text += ["", "Benchmark recovery:",
+                 f"- Maximum near-zone radius: {1000*recovery['maximum_near_zone_radius_um']:.3f} nm",
+                 f"- Minimum surface-safe probe radius at saved resolution: {1000*recovery['minimum_surface_safe_probe_radius_um']:.3f} nm",
+                 f"- {recovery['action']}",
+                 "- Reanalysis retains the saved particle radius, resolution and fields."]
     text += ["", "A theory match alone is provisional. Approve quantitative results only after all three numerical checks pass.",
              "The inverse dipole fit is conditional on the electrostatic model. Antisymmetric pair modes are theory predictions unless separately excited."]
     (output / "comparison_summary.md").write_text("\n".join(text)+"\n", encoding="utf-8")

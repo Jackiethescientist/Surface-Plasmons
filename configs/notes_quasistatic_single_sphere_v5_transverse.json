@@ -1,0 +1,50 @@
+{
+  "simulation_name": "notes_quasistatic_v5_single_transverse",
+  "precision": "fast",
+  "geometry": {
+    "particle_shape": "sphere",
+    "particle_count": 1,
+    "particle_material": "au",
+    "background_material": "air",
+    "substrate_material": "air",
+    "particle_radius_um": 0.01,
+    "spacing_um": 0.04,
+    "substrate_thickness_um": 0.02,
+    "surface_y_um": 0.0,
+    "particle_surface_gap_um": 0.0,
+    "defects": []
+  },
+  "source": {
+    "wavelength_range_nm": [
+      480.0,
+      650.0
+    ],
+    "propagation_axis": "y",
+    "propagation_direction": -1,
+    "polarisation": "Ez",
+    "span_pml": true
+  },
+  "measurement": {
+    "field_components": [
+      "Ex",
+      "Ey",
+      "Ez"
+    ],
+    "probe_margin_um": 0.03,
+    "probe_line_y_um": 0.01,
+    "probe_offset_from_particle_surface_um": 0.0,
+    "normalization_mode": "global_complex_reference",
+    "field_map_frequencies": "none",
+    "validation_region": "electrostatic_near_zone"
+  },
+  "numerics": {
+    "broadband_resolution": 400,
+    "field_resolution": 400,
+    "nfreq": 61,
+    "padding_um": 0.12,
+    "pml_thickness_um": 0.12,
+    "minimum_run_time": 20.0,
+    "maximum_run_time": 100.0,
+    "dft_decay_tolerance": 1e-05
+  }
+}
