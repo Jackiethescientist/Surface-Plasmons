@@ -210,6 +210,7 @@ class SimulationConfig:
     courant: float = 0.45
     k_point: tuple[float, float, float] = (0.0, 0.0, 0.0)
     force_complex_fields: bool = False
+    mirror_symmetry: bool = False
     progress_interval: float = 4.0
     stop_method: str = "dft_decay"       # dft_decay, field_decay, fixed_time
     dft_decay_tolerance: float = 1e-8
@@ -323,6 +324,7 @@ class SimulationConfig:
                 raise SimulationConfigError(f"Invalid PML axes: {sorted(invalid)}.")
         self.k_point = _vector3(self.k_point, "k_point")
         self.source.validate()
+        benchmark_mirror_planes(self)
         self.flux.validate()
         self.output.validate()
         if self.source.axis == "z" and self.dimensions == 2:
@@ -391,6 +393,46 @@ def validate_config(config: SimulationConfig | Mapping[str, Any]) -> SimulationC
     return SimulationConfig.from_dict(config)
 
 
+def benchmark_mirror_planes(cfg: SimulationConfig) -> tuple[tuple[str, int], ...]:
+    """Return source-compatible x/z mirrors for the supported sphere benchmark.
+
+    This deliberately accepts only the centred Au sphere in air, illuminated
+    along y with Ex or Ez. More general geometries need their own symmetry
+    checks; Meep does not verify the user's choice of symmetry.
+    """
+    if not isinstance(cfg.mirror_symmetry, bool):
+        raise SimulationConfigError("mirror_symmetry must be true or false.")
+    if not cfg.mirror_symmetry:
+        return ()
+    parameters = cfg.geometry_parameters
+    center = parameters.get("center", (0., 0., 0.))
+    source_center = cfg.source.center_um or (0., 0., 0.)
+    valid = (
+        cfg.dimensions == 3
+        and cfg.geometry_name == "particle_line_on_substrate"
+        and parameters.get("particle_shape", "sphere") == "sphere"
+        and parameters.get("particle_count") == 1
+        and parameters.get("particle") == "au"
+        and parameters.get("background") == parameters.get("substrate") == "air"
+        and not parameters.get("defects")
+        and len(center) == 3
+        and all(abs(float(center[i])) <= 1e-12 for i in (0, 2))
+        and all(abs(float(source_center[i])) <= 1e-12 for i in (0, 2))
+        and cfg.source.kind in {"gaussian", "continuous"}
+        and cfg.source.axis == "y"
+        and cfg.source.component.lower() in {"ex", "ez"}
+        and not any(abs(value) > 1e-12 for value in cfg.k_point)
+    )
+    if not valid:
+        raise SimulationConfigError(
+            "mirror_symmetry currently supports only one centred Au sphere "
+            "in air, without defects, illuminated along y with Ex or Ez "
+            "and zero k_point."
+        )
+    component_axis = cfg.source.component[-1].lower()
+    return tuple((axis, -1 if component_axis == axis else 1) for axis in ("x", "z"))
+
+
 def create_simulation(
     config: SimulationConfig | Mapping[str, Any],
     *,
@@ -436,6 +478,8 @@ def create_simulation(
         k_point=k_vector if use_bloch else False,
         ensure_periodicity=True,
         force_complex_fields=cfg.force_complex_fields,
+        symmetries=[mp.Mirror(_direction(mp, axis), phase=phase)
+                    for axis, phase in benchmark_mirror_planes(cfg)],
         Courant=cfg.courant,
         filename_prefix=identity,
         progress_interval=cfg.progress_interval,

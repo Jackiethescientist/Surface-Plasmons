@@ -199,6 +199,8 @@ def normalise_project_config(
     # Per-experiment overrides keep convergence runs reproducible without
     # changing global precision presets in this Python process.
     numerics = result["numerics"]
+    if not isinstance(numerics.get("mirror_symmetry", False), bool):
+        raise ProjectConfigError("numerics.mirror_symmetry must be a boolean.")
     for key in ("broadband_resolution", "field_resolution", "nfreq",
                 "minimum_run_time", "maximum_run_time", "dft_decay_tolerance"):
         if key in numerics:
@@ -327,6 +329,8 @@ def make_simulation_config(
         "geometry_parameters": geometry,
         "dimensions": 3,
         "resolution": selected_resolution,
+        **({"mirror_symmetry": numerics["mirror_symmetry"]}
+           if "mirror_symmetry" in numerics else {}),
         "cell_size_um": selected_cell,
         "padding_um": selected_padding,
         "pml_thickness_um": float(numerics["pml_thickness_um"]),
@@ -372,7 +376,15 @@ def estimate_runtime(config: Mapping[str, Any]) -> dict[str, float | int | str]:
     simulation = dict(config)
     cell = [float(value) for value in simulation["cell_size_um"]]
     resolution = float(simulation["resolution"])
-    grid = math.prod(max(1, math.ceil(value * resolution)) for value in cell)
+    grid_shape = [max(1, math.ceil(value * resolution)) for value in cell]
+    full_grid = math.prod(grid_shape)
+    if simulation.get("mirror_symmetry", False):
+        from .simulation import validate_config
+        # The estimate must not promise a reduction for an unsupported setup.
+        validate_config(simulation)
+        for axis in (0, 2):
+            grid_shape[axis] = math.ceil(grid_shape[axis] / 2)
+    grid = math.prod(grid_shape)
     courant = float(simulation.get("courant", 0.45))
     maximum_time = float(simulation.get("maximum_run_time", 100.0))
     steps = maximum_time * resolution / courant
@@ -383,6 +395,7 @@ def estimate_runtime(config: Mapping[str, Any]) -> dict[str, float | int | str]:
     memory_gb = grid * 220.0 / 1_000_000_000.0
     return {
         "grid_cells": int(grid),
+        "full_cell_grid_cells": int(full_grid),
         "estimated_min_seconds": minimum_seconds,
         "estimated_max_seconds": maximum_seconds,
         "estimated_memory_gb": memory_gb,

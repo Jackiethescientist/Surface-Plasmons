@@ -456,7 +456,8 @@ def _cached_samples(saved, marker, signature):
     return wavelengths, fields[:, indices, :]
 
 
-def _convergence(config, experiment, output, kind, values, cache_enabled, *, adaptive_resolution=True):
+def _convergence(config, experiment, output, kind, values, cache_enabled, *, adaptive_resolution=True,
+                 mirror_symmetry=False):
     from .workflow import run_broadband_stage
     if config["measurement"]["normalization_mode"] != "global_complex_reference":
         raise ValidationError("Numerical field comparison requires global_complex_reference normalization.")
@@ -498,6 +499,8 @@ def _convergence(config, experiment, output, kind, values, cache_enabled, *, ada
             sources.append("saved_baseline")
         else:
             candidate = deepcopy(config)
+            if mirror_symmetry:
+                candidate["numerics"]["mirror_symmetry"] = True
             if kind == "resolution": candidate["numerics"]["broadband_resolution"] = int(value)
             elif kind == "domain": candidate["numerics"]["padding_um"] = value
             else:
@@ -543,6 +546,9 @@ def _convergence(config, experiment, output, kind, values, cache_enabled, *, ada
               "criteria": {"complex_field_change": 0.05, "peak_wavelength_change": 0.02, "peak_amplitude_change": 0.05},
               "sample_count": len(points), "common_physical_sample_points": True,
               "monitor_edge_buffer_um": edge_buffer_um, "sample_x_um": points.tolist()}
+    if mirror_symmetry:
+        report["mirror_symmetry_for_new_runs"] = True
+        report["baseline_reused_without_rerunning"] = baseline_value in [p[0] for p in profiles]
     _write_csv(output / f"{kind}_convergence.csv", records)
     _write_json(output / f"{kind}_convergence_summary.json", report)
     return report
@@ -597,7 +603,8 @@ def _saved_convergence_reports(directory, config, exclude):
 def run_validation(experiment: str | Path, *, validation_name="notes_validation_v1",
                    checks: Sequence[str] = ("configuration", "theory"), results_root=None,
                    resolutions=None, paddings_um=None, time_factors=None, cache_enabled=True,
-                   tolerance=0.05, peak_tolerance=0.02, adaptive_resolution=True) -> Path:
+                   tolerance=0.05, peak_tolerance=0.02, adaptive_resolution=True,
+                   mirror_symmetry=False) -> Path:
     directory = resolve_experiment(experiment, results_root)
     config = normalise_project_config(json.loads((directory / "config_resolved.json").read_text(encoding="utf-8")))
     selected = {str(v).strip().lower() for v in checks}
@@ -607,6 +614,17 @@ def run_validation(experiment: str | Path, *, validation_name="notes_validation_
         raise ValidationError(f"Choose checks from {sorted(allowed)}. The old hierarchy comparison has been removed.")
     if not (0 < tolerance < 1 and 0 < peak_tolerance < 1):
         raise ValidationError("Tolerances must be fractions between 0 and 1.")
+    if not isinstance(mirror_symmetry, bool):
+        raise ValidationError("mirror_symmetry must be true or false.")
+    if mirror_symmetry:
+        if not selected & {"resolution", "domain", "time"}:
+            raise ValidationError("--mirror-symmetry requires a numerical convergence check.")
+        from .project import make_simulation_config
+        from .simulation import validate_config
+        preview = deepcopy(config)
+        preview["numerics"]["mirror_symmetry"] = True
+        validate_config(make_simulation_config(preview, experiment_directory=directory,
+                                               stage_name="symmetry_preflight"))
     profile = _profile(config)
     resolutions = list(resolutions) if resolutions is not None else [int(profile["broadband_resolution"])+v for v in (0, 40, 80)]
     paddings_um = list(paddings_um) if paddings_um is not None else [config["numerics"]["padding_um"]+v for v in (0, 0.1)]
@@ -617,6 +635,8 @@ def run_validation(experiment: str | Path, *, validation_name="notes_validation_
                 "time_factors": time_factors if "time" in selected else None,
                 "tolerance": tolerance, "peak_tolerance": peak_tolerance,
                 "adaptive_resolution": bool(adaptive_resolution) if "resolution" in selected else None}
+    if mirror_symmetry:
+        identity["mirror_symmetry_for_new_runs"] = True
     output = directory / "validation" / safe_simulation_name(validation_name)
     marker = output / "validation_config.json"
     if output.exists() and (not marker.is_file() or json.loads(marker.read_text(encoding="utf-8")) != identity):
@@ -627,7 +647,10 @@ def run_validation(experiment: str | Path, *, validation_name="notes_validation_
     if "configuration" in selected: reports["configuration"] = _configuration_check(config, output)
     if "theory" in selected: reports["theory"] = _theory_check(config, directory, output, tolerance=tolerance, peak_tolerance=peak_tolerance)
     for kind, values in (("resolution", resolutions), ("domain", paddings_um), ("time", time_factors)):
-        if kind in selected: reports[kind] = _convergence(config, directory, output, kind, values, cache_enabled, adaptive_resolution=adaptive_resolution)
+        if kind in selected:
+            reports[kind] = _convergence(config, directory, output, kind, values, cache_enabled,
+                                         adaptive_resolution=adaptive_resolution,
+                                         mirror_symmetry=mirror_symmetry)
     reports["numerical_check_availability"] = {
         kind: {"status": "computed_in_this_analysis" if kind in selected else
                          ("loaded_compatible_saved_check" if kind in reports else "not_requested_no_compatible_saved_report_found"),
