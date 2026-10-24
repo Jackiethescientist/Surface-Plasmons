@@ -121,6 +121,13 @@ def _validation_region(config):
     return region
 
 
+def _resonance_required(config):
+    nonresonant = config["measurement"].get("validation_benchmark", "resonant") == "nonresonant_dielectric"
+    if nonresonant:
+        normalise_project_config(config)  # refuse using this policy for gold or dispersive particles
+    return not nonresonant
+
+
 def _maximum_host_k(dielectric, wavelengths):
     return max(float(abs(2*np.pi*np.sqrt(_epsilon(dielectric, "background", wave))/(wave/1000))) for wave in wavelengths)
 
@@ -137,6 +144,7 @@ def _applicability_details(spectra, reference_error, tolerance):
 
 
 def _theory_check(config, experiment, output, *, tolerance=0.05, peak_tolerance=0.02):
+    resonance_required = _resonance_required(config)
     geometry = config["geometry"]
     if geometry["particle_shape"] != "sphere":
         report = {"status": "skipped", "reason": "The notes specify sphere polarizability; this geometry is not spherical."}
@@ -150,6 +158,12 @@ def _theory_check(config, experiment, output, *, tolerance=0.05, peak_tolerance=
     rows = _read_csv(scan / "field_strength_vs_position_and_frequency.csv")
     dielectric = _read_csv(scan / "dielectric_function_vs_frequency.csv")
     wavelengths = sorted({float(r["wavelength_nm"]) for r in rows})
+    if not resonance_required:
+        for role in ("particle", "background", "substrate"):
+            values = np.array([_epsilon(dielectric, role, wave) for wave in wavelengths])
+            if (np.any(values.real <= 0) or np.any(np.abs(values.imag) > 1e-10)
+                    or not np.allclose(values, values[0], rtol=1e-10, atol=1e-12)):
+                raise ValidationError("Nonresonant dielectric data must have constant positive, lossless permittivity throughout the saved band.")
     # Check optical, rather than material-name, equality over the entire band.
     for wavelength in wavelengths:
         em = _epsilon(dielectric, "background", wavelength)
@@ -320,13 +334,26 @@ def _theory_check(config, experiment, output, *, tolerance=0.05, peak_tolerance=
                             "status": "passed" if peak_error is not None and peak_error <= peak_tolerance else "failed_or_unresolved"},
         "peak_sampling": {"status": "passed" if peak_sampling_sufficient else "unresolved"},
     }
-    failure_reasons = [name for name, check in agreement_checks.items() if check["status"] != "passed"]
+    if not resonance_required:
+        per_frequency = [_nrmse(actual, predicted) for actual, predicted in zip(all_actual, all_theory)]
+        worst_error = max(per_frequency) if all(e is not None for e in per_frequency) else None
+        agreement_checks["worst_frequency_complex_field"] = {
+            "value": worst_error, "limit": tolerance,
+            "status": "passed" if worst_error is not None and worst_error <= tolerance else "failed"}
+        for key in ("peak_wavelength", "peak_sampling"):
+            agreement_checks[key] = {"status": "not_applicable", "reason": "Declared constant positive dielectric benchmark; no resonance is expected."}
+        agreement = "passed" if all(check["status"] in {"passed", "not_applicable"}
+                                     for check in agreement_checks.values()) else "failed"
+    failure_reasons = [name for name, check in agreement_checks.items() if check["status"] not in {"passed", "not_applicable"}]
     warnings = []
     if 2*radius*resolution < 12:
         warnings.append("The diameter has fewer than 12 grid cells. This is a coarse initial mesh; convergence is required and may need finer settings.")
     if applicability_reasons:
         warnings.append("An electrostatic model disagreement outside its applicability screen does not by itself show an FDTD solver error.")
     report = {"status": "completed", "model": "notes_electrostatic_only", "formulas": FORMULAS,
+              "benchmark_scope": "resonant_electrostatic_comparison" if resonance_required else "nonresonant_dielectric_pipeline",
+              "resonance_check_required": resonance_required,
+              "scope_limitation": "Applies only to this saved configuration, frequency band, polarisation and sampled exterior fields. A dielectric pass does not validate dispersive gold or other research geometries.",
               "agreement_status": agreement, "applicability_status": applicability,
               "agreement_checks": agreement_checks, "failure_reasons": failure_reasons,
               "applicability_checks": applicability_checks, "applicability_failure_reasons": applicability_reasons,
@@ -398,13 +425,20 @@ def _sample_response(actual, reference, config, points):
     return np.stack(components, axis=-1)
 
 
-def _convergence_metrics(profile, reference):
+def _convergence_metrics(profile, reference, *, resonance_required=True):
     value, wave, field = profile
     _, ref_wave, ref_field = reference
     if wave.shape != ref_wave.shape or not np.allclose(wave, ref_wave):
         raise ValidationError("Convergence cases have different frequency grids.")
     response = np.sqrt(np.mean(np.abs(field)**2, axis=(1, 2)))
     ref_response = np.sqrt(np.mean(np.abs(ref_field)**2, axis=(1, 2)))
+    if not resonance_required:
+        errors = [_nrmse(a, b) for a, b in zip(field, ref_field)]
+        return {"value": value, "complex_field_relative_l2_change": _nrmse(field, ref_field),
+                "resonance_check_required": False,
+                "worst_frequency_complex_field_change": max(errors) if all(e is not None for e in errors) else None,
+                "relative_maximum_spectral_amplitude_change": float(abs(np.max(response)-np.max(ref_response))/max(np.max(ref_response), 1e-30)),
+                "peak_check_status": "not_applicable"}
     peak, refpeak = _peak(wave, response), _peak(wave, ref_response)
     resolved = peak["status"] == refpeak["status"] == "resolved_sampled_peak"
     sampling_ok = resolved and all(p["sampling_uncertainty_nm"] / p["wavelength_nm"] <= .02 for p in (peak, refpeak))
@@ -416,6 +450,10 @@ def _convergence_metrics(profile, reference):
 
 def _convergence_passed(metrics):
     error = metrics["complex_field_relative_l2_change"]
+    if metrics.get("resonance_check_required") is False:
+        worst = metrics["worst_frequency_complex_field_change"]
+        return (error is not None and error <= .05 and worst is not None and worst <= .05
+                and metrics["relative_maximum_spectral_amplitude_change"] <= .05)
     return (error is not None and error <= .05
             and metrics["relative_peak_wavelength_change"] <= .02
             and metrics["relative_peak_amplitude_change"] <= .05 and metrics["peak_resolved"])
@@ -459,6 +497,7 @@ def _cached_samples(saved, marker, signature):
 def _convergence(config, experiment, output, kind, values, cache_enabled, *, adaptive_resolution=True,
                  mirror_symmetry=False):
     from .workflow import run_broadband_stage
+    resonance_required = _resonance_required(config)
     if config["measurement"]["normalization_mode"] != "global_complex_reference":
         raise ValidationError("Numerical field comparison requires global_complex_reference normalization.")
     values = sorted(set(float(v) for v in values))
@@ -532,9 +571,9 @@ def _convergence(config, experiment, output, kind, values, cache_enabled, *, ada
         order = np.argsort(wavelengths)
         profiles.append((value, wavelengths[order], response[order]))
         if kind == "resolution" and adaptive_resolution and len(profiles) >= 2:
-            if _convergence_passed(_convergence_metrics(profiles[-2], profiles[-1])):
+            if _convergence_passed(_convergence_metrics(profiles[-2], profiles[-1], resonance_required=resonance_required)):
                 break
-    records = [_convergence_metrics(profile, profiles[-1]) for profile in profiles]
+    records = [_convergence_metrics(profile, profiles[-1], resonance_required=resonance_required) for profile in profiles]
     for record, source in zip(records, sources):
         record["source"] = source
     last = records[-2]
@@ -549,6 +588,10 @@ def _convergence(config, experiment, output, kind, values, cache_enabled, *, ada
     if mirror_symmetry:
         report["mirror_symmetry_for_new_runs"] = True
         report["baseline_reused_without_rerunning"] = baseline_value in [p[0] for p in profiles]
+    if not resonance_required:
+        report["resonance_check_required"] = False
+        report["criteria"] = {"complex_field_change": .05, "worst_frequency_complex_field_change": .05,
+                              "maximum_spectral_amplitude_change": .05}
     _write_csv(output / f"{kind}_convergence.csv", records)
     _write_json(output / f"{kind}_convergence_summary.json", report)
     return report
@@ -563,9 +606,12 @@ def _baseline_analysis_signature(config):
         simulation.pop(key, None)
     for key in ("experiment_directory", "stage_name"):
         simulation["output"].pop(key, None)
-    return config_hash({"simulation": simulation,
+    signature = {"simulation": simulation,
                         "normalization_mode": resolved["measurement"]["normalization_mode"],
-                        "validation_region": _validation_region(resolved)})
+                        "validation_region": _validation_region(resolved)}
+    if not _resonance_required(resolved):
+        signature["validation_benchmark"] = "nonresonant_dielectric"
+    return config_hash(signature)
 
 
 def _saved_convergence_reports(directory, config, exclude):
@@ -593,6 +639,11 @@ def _saved_convergence_reports(directory, config, exclude):
                 continue
             criteria = report.get("criteria", {})
             required = {"complex_field_change": .05, "peak_wavelength_change": .02, "peak_amplitude_change": .05}
+            if not _resonance_required(config):
+                if report.get("resonance_check_required") is not False:
+                    continue
+                required = {"complex_field_change": .05, "worst_frequency_complex_field_change": .05,
+                            "maximum_spectral_amplitude_change": .05}
             if any(not isinstance(criteria.get(key), (float, int)) or not 0 < criteria[key] <= limit for key, limit in required.items()):
                 continue
             reports[kind] = {**report, "loaded_from_saved_results": True,
@@ -660,9 +711,12 @@ def run_validation(experiment: str | Path, *, validation_name="notes_validation_
     numerical_pass = all(reports.get(k, {}).get("convergence_status") == "passed" for k in ("resolution", "domain", "time"))
     model_pass = theory.get("agreement_status") == "passed" and theory.get("applicability_status") == "passed"
     reports["overall"] = {"status": "validated" if model_pass and numerical_pass else "not_validated",
+                          "scope": theory.get("benchmark_scope", "not_evaluated"),
+                          "scope_limitation": "This result applies only to the tested configuration and sampled fields; it does not certify all research simulations or resolve the separate gold benchmark.",
                           "model_and_applicability_passed": model_pass, "all_numerical_checks_passed": numerical_pass}
     _write_json(output / "validation_summary.json", reports)
     text = ["# Electrostatic notes validation", "", f"Overall: {reports['overall']['status']}", f"Model agreement: {theory.get('agreement_status', theory.get('status', 'not requested'))}",
+            f"Scope: {reports['overall']['scope']}", reports['overall']['scope_limitation'],
             f"Applicability: {theory.get('applicability_status', theory.get('reason', 'not evaluated'))}",
             f"Complex scattered-field relative L2 error: {theory.get('complex_scattered_field_relative_l2_error', 'unavailable')}",
             f"Amplitude-only diagnostic relative L2 error: {theory.get('amplitude_only_diagnostic_relative_l2_error', 'unavailable')}",

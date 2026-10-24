@@ -396,7 +396,8 @@ def validate_config(config: SimulationConfig | Mapping[str, Any]) -> SimulationC
 def benchmark_mirror_planes(cfg: SimulationConfig) -> tuple[tuple[str, int], ...]:
     """Return source-compatible x/z mirrors for the supported sphere benchmark.
 
-    This deliberately accepts only the centred Au sphere in air, illuminated
+    This deliberately accepts only a centred Au sphere in air or a constant
+    glass sphere in vacuum/air, illuminated
     along y with Ex or Ez. More general geometries need their own symmetry
     checks; Meep does not verify the user's choice of symmetry.
     """
@@ -412,8 +413,11 @@ def benchmark_mirror_planes(cfg: SimulationConfig) -> tuple[tuple[str, int], ...
         and cfg.geometry_name == "particle_line_on_substrate"
         and parameters.get("particle_shape", "sphere") == "sphere"
         and parameters.get("particle_count") == 1
-        and parameters.get("particle") == "au"
-        and parameters.get("background") == parameters.get("substrate") == "air"
+        and ((parameters.get("particle") == "au"
+              and parameters.get("background") == parameters.get("substrate") == "air")
+             or (parameters.get("particle") == "glass_constant"
+                 and parameters.get("background") == parameters.get("substrate")
+                 and parameters.get("background") in {"vacuum", "air"}))
         and not parameters.get("defects")
         and len(center) == 3
         and all(abs(float(center[i])) <= 1e-12 for i in (0, 2))
@@ -425,8 +429,8 @@ def benchmark_mirror_planes(cfg: SimulationConfig) -> tuple[tuple[str, int], ...
     )
     if not valid:
         raise SimulationConfigError(
-            "mirror_symmetry currently supports only one centred Au sphere "
-            "in air, without defects, illuminated along y with Ex or Ez "
+            "mirror_symmetry supports one centred Au sphere in air or constant glass "
+            "sphere in vacuum/air, without defects, illuminated along y with Ex or Ez "
             "and zero k_point."
         )
     component_axis = cfg.source.component[-1].lower()

@@ -181,6 +181,21 @@ def normalise_project_config(
     if sorted(str(value).lower() for value in components) != ["ex", "ey", "ez"]:
         raise ProjectConfigError("measurement.field_components must contain Ex, Ey, and Ez.")
     measurement = result["measurement"]
+    benchmark = measurement.get("validation_benchmark", "resonant")
+    if benchmark not in {"resonant", "nonresonant_dielectric"}:
+        raise ProjectConfigError("measurement.validation_benchmark must be resonant or nonresonant_dielectric.")
+    if benchmark == "nonresonant_dielectric":
+        from .materials import get_material_spec
+        specs = [get_material_spec(geometry[key]) for key in
+                 ("particle_material", "background_material", "substrate_material")]
+        def positive_constant(spec):
+            value = spec.epsilon if spec.epsilon is not None else (
+                spec.refractive_index**2 if spec.refractive_index is not None else None)
+            return not spec.is_dispersive and value is not None and value > 0
+        if (geometry["particle_shape"] != "sphere" or geometry["particle_count"] != 1
+                or geometry.get("defects") or not all(positive_constant(s) for s in specs)
+                or specs[1].key != specs[2].key or specs[0].key == specs[1].key):
+            raise ProjectConfigError("The nonresonant dielectric benchmark requires one constant positive-permittivity sphere in a uniform, different constant host, without defects. It cannot disable gold resonance checks.")
     if float(measurement["probe_offset_from_particle_surface_um"]) < 0:
         raise ProjectConfigError(
             "measurement.probe_offset_from_particle_surface_um cannot be negative."

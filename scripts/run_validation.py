@@ -27,7 +27,7 @@ def main():
     parser.add_argument("--no-reference-cache", action="store_true")
     parser.add_argument("--full-resolution-ladder", action="store_true", help="Run every requested resolution instead of stopping at the first converged pair.")
     parser.add_argument("--mirror-symmetry", action="store_true",
-                        help="Use x/z mirrors for new numerical runs of the supported single Au sphere in air; reuse the saved baseline.")
+                        help="Use x/z mirrors for supported single Au/air or constant-glass/vacuum benchmarks; reuse the saved baseline.")
     args = parser.parse_args()
     try:
         output = run_validation(args.simulation, validation_name=args.name,
