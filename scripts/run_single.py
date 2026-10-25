@@ -33,9 +33,10 @@ from surface_plasmons.validation import ValidationError, run_validation
 from surface_plasmons.workflow import WorkflowError, run_project
 
 
-DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "perfect_line.json" 
+DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "validated_sphere_ex_v15.json"
 
 from surface_plasmons.notes_theory import FORMULAS as THEORY_FORMULAS
+from surface_plasmons.validated_scope import enforce_validated_project
 
 
 def _duration(seconds: float) -> str:
@@ -167,6 +168,7 @@ def main() -> None:
     try:
         loaded = load_project_config(args.config)
         config = normalise_project_config(loaded, name=args.name, precision=args.precision)
+        enforce_validated_project(config, field_map_selection=args.field_maps)
         preview = make_simulation_config(
             config,
             experiment_directory=Path("data/results") / "preview_only",

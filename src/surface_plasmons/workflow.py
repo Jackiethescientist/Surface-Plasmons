@@ -902,6 +902,8 @@ def run_project(
     field_map_selection: str | Sequence[float] | None = None,
 ) -> ExperimentWorkspace:
     config = normalise_project_config(project_config)
+    from .validated_scope import enforce_validated_project
+    enforce_validated_project(config, field_map_selection=field_map_selection)
     workspace = ExperimentWorkspace.create(
         config["simulation_name"], config, results_root=results_root, resume=resume
     )

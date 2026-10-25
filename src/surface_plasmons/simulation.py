@@ -28,6 +28,7 @@ import numpy as np
 from .database import SimulationDatabase, find_project_root, new_run_id
 from .geometries import GeometryBuild, build_geometry, get_geometry_spec
 from .particle_line import line_extents
+from .validated_scope import enforce_validated_simulation
 
 
 class SimulationConfigError(ValueError):
@@ -446,6 +447,7 @@ def create_simulation(
     """Construct MEEP objects and monitors without advancing the fields."""
 
     cfg = validate_config(config)
+    enforce_validated_simulation(cfg)
     mp = _import_meep()
     identity = run_id or cfg.run_id or new_run_id()
     geometry_parameters = dict(cfg.geometry_parameters)
@@ -582,6 +584,7 @@ def run_simulation(
     else:
         raw = {**config, **overrides}
     cfg = validate_config(raw)
+    enforce_validated_simulation(cfg)
     mp = _import_meep()
     identity = cfg.run_id or new_run_id()
     output_paths = _output_paths(cfg, identity)
