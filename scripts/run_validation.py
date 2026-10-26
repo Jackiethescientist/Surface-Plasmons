@@ -25,6 +25,8 @@ def main():
     parser.add_argument("--field-tolerance", type=float, default=0.05)
     parser.add_argument("--peak-tolerance", type=float, default=0.02)
     parser.add_argument("--no-reference-cache", action="store_true")
+    parser.add_argument("--workers", type=int, choices=(1, 2), default=1,
+                        help="Concurrent reference/particle solves within each convergence case.")
     parser.add_argument("--full-resolution-ladder", action="store_true", help="Run every requested resolution instead of stopping at the first converged pair.")
     parser.add_argument("--mirror-symmetry", action="store_true",
                         help="Use x/z mirrors for new numerical runs of the supported single Au sphere in air; reuse the saved baseline.")
@@ -36,7 +38,7 @@ def main():
             time_factors=_numbers(args.time_factors), tolerance=args.field_tolerance,
             peak_tolerance=args.peak_tolerance, cache_enabled=not args.no_reference_cache,
             adaptive_resolution=not args.full_resolution_ladder,
-            mirror_symmetry=args.mirror_symmetry)
+            mirror_symmetry=args.mirror_symmetry, workers=args.workers)
     except KeyboardInterrupt:
         raise SystemExit("Validation interrupted. Completed numerical samples were preserved.")
     except (ValidationError, ResultsError, RuntimeError, ValueError, OSError) as exc:
@@ -46,3 +48,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
