@@ -39,7 +39,7 @@ def cases(base, prefix):
     return result
 
 
-def ensure_simulation(config, root, cache_enabled):
+def ensure_simulation(config, root, cache_enabled, *, workers=1):
     target = root / safe_simulation_name(config["simulation_name"])
     if target.exists():
         manifest = target / "manifest.json"
@@ -51,7 +51,8 @@ def ensure_simulation(config, root, cache_enabled):
         if previous.get("status") == "completed":
             print(f"Reusing completed simulation: {target.name}")
             return target
-    run_project(config, results_root=root, resume=target.exists(), cache_enabled=cache_enabled, field_map_selection="none")
+    run_project(config, results_root=root, resume=target.exists(), cache_enabled=cache_enabled,
+                field_map_selection="none", workers=workers)
     return target
 
 
@@ -148,6 +149,8 @@ def main():
     parser.add_argument("--results-root", type=Path)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--no-reference-cache", action="store_true")
+    parser.add_argument("--workers", type=int, choices=(1, 2), default=1,
+                        help="Solver processes per case; sequence/adaptive check order is preserved.")
     args = parser.parse_args()
     base = load_project_config(args.config)
     if base["geometry"]["particle_shape"] != "sphere" or base["geometry"]["particle_count"] != 1 or base["geometry"]["defects"]:
@@ -167,7 +170,8 @@ def main():
             for kind, _, _, config in entries:
                 if kind != group:
                     continue
-                directory = ensure_simulation(config, root, not args.no_reference_cache)
+                worker_options = {"workers": args.workers} if args.workers != 1 else {}
+                directory = ensure_simulation(config, root, not args.no_reference_cache, **worker_options)
                 run_validation(directory, validation_name=args.comparison_name, checks=("configuration", "theory"))
         scope = "all" if args.stage == "all" else args.convergence_scope.replace("pairs", "pair")
         if args.stage in ("convergence", "all") and scope in ("all", group):
@@ -177,7 +181,8 @@ def main():
                 directory = root / safe_simulation_name(config["simulation_name"])
                 if not (directory / "config_resolved.json").is_file():
                     raise ValidationError(f"Run the {group} stage first. Missing {directory.name}.")
-                run_validation(directory, validation_name="notes_convergence", checks=("resolution", "domain", "time"), cache_enabled=not args.no_reference_cache)
+                run_validation(directory, validation_name="notes_convergence", checks=("resolution", "domain", "time"), cache_enabled=not args.no_reference_cache,
+                               workers=args.workers)
     write_summary(root, entries, args.name, args.comparison_name, args.summary_name)
 
 
@@ -188,3 +193,4 @@ if __name__ == "__main__":
         raise SystemExit("Sequence interrupted. Repeat the same command to reuse completed results.")
     except (OSError, ValueError, RuntimeError) as exc:
         raise SystemExit(f"Sequence failed: {exc}") from exc
+

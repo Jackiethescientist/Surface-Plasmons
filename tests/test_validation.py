@@ -127,9 +127,11 @@ def test_band_edge_peak_never_becomes_a_pass(tmp_path):
 def test_resolution_time_and_resume_use_actual_new_configurations(tmp_path, monkeypatch):
     directory, config, raw = synthetic(tmp_path)
     calls = []
+    worker_counts = []
 
     def fake_run(candidate, workspace, **kwargs):
         calls.append(candidate)
+        worker_counts.append(kwargs["workers"])
         wavelengths = np.asarray([480.,500.,520.,540.,560.])
         data = {c:[] for c in ('Ex','Ey','Ez')}
         for wave in wavelengths:
@@ -144,17 +146,19 @@ def test_resolution_time_and_resume_use_actual_new_configurations(tmp_path, monk
 
     monkeypatch.setattr('surface_plasmons.workflow.run_broadband_stage', fake_run)
     output = run_validation(directory, validation_name='numerics', checks=['resolution','time'],
-                            resolutions=[1200,1600], time_factors=[1,2])
+                            resolutions=[1200,1600], time_factors=[1,2], workers=2)
     report = json.loads((output/'validation_summary.json').read_text())
     assert report['resolution']['convergence_status'] == 'passed'
     assert report['time']['convergence_status'] == 'passed'
-    assert len(calls) == 4
+    # Resolution 1600 and time factor 1 reuse the saved baseline.
+    assert len(calls) == 2
+    assert worker_counts == [2, 2]
     assert calls[-1]['numerics']['maximum_run_time'] == 200
     assert calls[-1]['numerics']['minimum_run_time'] == 40
     assert calls[-1]['numerics']['dft_decay_tolerance'] == pytest.approx(5e-6)
     run_validation(directory, validation_name='numerics', checks=['resolution','time'],
                    resolutions=[1200,1600], time_factors=[1,2])
-    assert len(calls) == 4
+    assert len(calls) == 2
 
 
 def test_project_numerics_and_centreline_monitor_reach_simulation_config(tmp_path):
@@ -231,3 +235,4 @@ def test_all_sequence_orders_single_convergence_before_pair_runs(tmp_path, monke
     assert history[:4] == [('single','notes_comparison')]*2 + [('single','notes_convergence')]*2
     assert history[4:10] == [('pair','notes_comparison')]*6
     assert history[10:] == [('pair','notes_convergence')]*6
+
