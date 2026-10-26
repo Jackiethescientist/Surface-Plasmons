@@ -8,12 +8,11 @@ process execution is available when explicitly requested.
 
 from __future__ import annotations
 
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from copy import deepcopy
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime, timezone
 from itertools import product
-from multiprocessing import get_context
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Iterable, Mapping, Sequence
@@ -27,6 +26,7 @@ import uuid
 
 from .database import SimulationDatabase, canonical_json, find_project_root
 from .simulation import run_simulation, validate_config
+from .parallel import worker_pool
 
 
 class SweepError(ValueError):
@@ -324,7 +324,8 @@ def set_config_value(config: dict[str, Any], path: str, value: Any) -> None:
         current[final] = value
 
 
-def run_sweep(config: SweepConfig | Mapping[str, Any]) -> SweepResult:
+def run_sweep(config: SweepConfig | Mapping[str, Any], *,
+              worker_initializer=None, worker_initargs=()) -> SweepResult:
     """Execute a parameter sweep and continuously save JSON/CSV manifests."""
 
     sweep = _coerce_sweep_config(config)
@@ -397,9 +398,8 @@ def run_sweep(config: SweepConfig | Mapping[str, Any]) -> SweepResult:
                 break
     else:
         # MEEP simulations are isolated in spawned processes; do not use threads.
-        with ProcessPoolExecutor(
-            max_workers=sweep.workers,
-            mp_context=get_context("spawn"),
+        with worker_pool(
+            sweep.workers, initializer=worker_initializer, initargs=worker_initargs,
         ) as executor:
             futures = {
                 executor.submit(_execute_variant, *item): item
@@ -468,6 +468,9 @@ def run_sweep(config: SweepConfig | Mapping[str, Any]) -> SweepResult:
 def parameter_sweep(
     base_config: Mapping[str, Any],
     parameters: Mapping[str, Sequence[Any]],
+    *,
+    worker_initializer=None,
+    worker_initargs=(),
     **options: Any,
 ) -> SweepResult:
     """Compact wrapper around :func:`run_sweep`."""
@@ -475,7 +478,8 @@ def parameter_sweep(
     return run_sweep(
         SweepConfig.from_dict(
             {"base_config": dict(base_config), "parameters": parameters, **options}
-        )
+        ),
+        worker_initializer=worker_initializer, worker_initargs=worker_initargs,
     )
 
 
@@ -721,3 +725,4 @@ __all__ = [
 run_parameter_sweep = parameter_sweep
 sweep = parameter_sweep
 __all__.extend(["run_parameter_sweep", "sweep"])
+

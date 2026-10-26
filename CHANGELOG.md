@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The project follows Sem
 
 ## Unreleased
 
+- Add opt-in `--workers 2` support to particle-line runs, validation, notes
+  sequences and generic sweeps; retain one worker by default.
+- Run independent particle/reference solves in spawned processes while keeping
+  manifest writes and adaptive convergence decisions in the parent.
+- Lock shared particle-line references, isolate uncached reference outputs,
+  and install timing/cache hooks inside generic sweep workers.
+- Limit numerical-library threads in child processes and stop sibling workers
+  when a solve fails or the parent is interrupted.
+
 ## 0.3.1 - 2026-10-09
 
 ### Added
@@ -74,3 +83,4 @@ All notable changes to this project are documented here. The project follows Sem
 ## 0.1.2 - 2026-09-13
 
 - Initial packaged analytical surface-plasmon model.
+

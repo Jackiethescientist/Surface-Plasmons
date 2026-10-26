@@ -24,6 +24,7 @@ import json
 import math
 from pathlib import Path
 import re
+import atexit
 from statistics import fmean
 from typing import Any, Mapping, Sequence
 
@@ -31,19 +32,19 @@ import numpy as np
 
 from surface_plasmons.sweep import SweepResult, parameter_sweep
 
-# Both files belong in the same scripts/ folder.
-from run_general_single import (
-    PRECISION_MODES,
-    REFERENCE_CACHE_ENABLED,
-    RESEARCH_CSV_COLUMNS,
-    apply_broadband_precision,
-    analyze_research_result,
-    get_precision_profile,
-    run_resonance_field_stage,
-    research_rows,
-    safe_name,
-    simulation_runtime_features,
-)
+# Support both direct execution and imports in spawned/test processes.
+if __package__:
+    from .run_general_single import (
+        PRECISION_MODES, REFERENCE_CACHE_ENABLED, RESEARCH_CSV_COLUMNS,
+        apply_broadband_precision, analyze_research_result, get_precision_profile,
+        run_resonance_field_stage, research_rows, safe_name, simulation_runtime_features,
+    )
+else:
+    from run_general_single import (
+        PRECISION_MODES, REFERENCE_CACHE_ENABLED, RESEARCH_CSV_COLUMNS,
+        apply_broadband_precision, analyze_research_result, get_precision_profile,
+        run_resonance_field_stage, research_rows, safe_name, simulation_runtime_features,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +71,7 @@ BASE_CONFIG: dict[str, Any] = {
             "radius": 0.040,
         },
     },
-    # A real 3-D MEEP domain. Keep workers at 1 until memory use is known.
+    # A real 3-D MEEP domain. Measure memory before opting into two workers.
     "dimensions": 3,
     "resolution": int(PRECISION_MODES[DEFAULT_SWEEP_PRECISION]["broadband_resolution"]),
     "dft_decay_tolerance": PRECISION_MODES[DEFAULT_SWEEP_PRECISION]["dft_decay_tolerance"],
@@ -200,6 +201,15 @@ ACTIVE_SWEEP_PARAMETERS = ["particle_size"]
 
 REPETITIONS = 1
 DEFAULT_WORKERS = 1  # MEEP is memory intensive; start with one worker.
+
+
+def initialise_sweep_worker(cache_enabled: bool) -> None:
+    """Install timing and locked reference reuse in each spawned process."""
+    features = simulation_runtime_features(cache_enabled)
+    features.__enter__()
+    # Retain the context until worker exit; the parent's patch is not inherited
+    # under spawn. Each worker calibrates its own time estimates.
+    atexit.register(features.__exit__, None, None, None)
 
 # Every available numeric research result is plotted when data exists.
 PLOT_RESULTS = {
@@ -673,7 +683,7 @@ def parse_args() -> Any:
     parser = ArgumentParser(description=__doc__)
     parser.add_argument("--name", default=DEFAULT_SWEEP_NAME)
     parser.add_argument("--sweep-id")
-    parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
+    parser.add_argument("--workers", type=int, choices=(1, 2), default=DEFAULT_WORKERS)
     parser.add_argument("--no-resume", action="store_true")
     parser.add_argument("--stop-on-error", action="store_true")
     parser.add_argument(
@@ -702,11 +712,6 @@ def main() -> None:
         raise SystemExit("Sweep name cannot be empty.")
     if args.workers < 1:
         raise SystemExit("--workers must be at least 1.")
-    if args.workers != 1:
-        raise SystemExit(
-            "V5 time estimates and shared reference caching require --workers 1. "
-            "Run independent sweeps in separate terminals if parallel execution is needed."
-        )
 
     sweep_id = args.sweep_id or make_sweep_id(display_name)
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", sweep_id):
@@ -752,6 +757,7 @@ def main() -> None:
     selected_display = ", ".join(str(index + 1) for index in sorted(field_point_indices))
     print(f"Field-map sweep points: {selected_display or 'none'}")
     print(f"Reference cache: {'enabled' if cache_enabled else 'disabled'}")
+    print(f"Solver workers: {args.workers}; resonance-field stages run sequentially afterwards")
     print(f"Sweep ID / results name: {sweep_id}")
 
     with simulation_runtime_features(cache_enabled):
@@ -765,6 +771,8 @@ def main() -> None:
             repetitions=REPETITIONS,
             continue_on_error=not args.stop_on_error,
             resume=not args.no_resume,
+            worker_initializer=initialise_sweep_worker,
+            worker_initargs=(cache_enabled,),
         )
 
         csv_path, row_count, records, warnings = export_research_results(
@@ -794,3 +802,4 @@ def main() -> None:
 if __name__ == "__main__":
     # Required when workers > 1.
     main()
+

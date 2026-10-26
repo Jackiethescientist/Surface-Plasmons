@@ -145,6 +145,8 @@ def parse_args() -> Any:
     parser.add_argument("--results-root", type=Path)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--no-reference-cache", action="store_true")
+    parser.add_argument("--workers", type=int, choices=(1, 2), default=1,
+                        help="Concurrent reference/particle solver processes; default 1.")
     parser.add_argument(
         "--skip-validation",
         action="store_true",
@@ -198,6 +200,7 @@ def main() -> None:
     maps = args.field_maps if args.field_maps is not None else config["measurement"]["field_map_frequencies"]
     print(f"Narrowband field maps: {maps}")
     print(f"Reference reuse: {'disabled' if args.no_reference_cache else 'enabled'}")
+    print(f"Solver workers: {args.workers}")
     print(f"Automatic theory validation: {'disabled' if args.skip_validation else 'enabled'}")
     if args.dry_run:
         print("Dry run complete; MEEP was not started and no result folder was created.")
@@ -210,6 +213,7 @@ def main() -> None:
             resume=args.resume,
             cache_enabled=not args.no_reference_cache,
             field_map_selection=args.field_maps,
+            workers=args.workers,
         )
     except KeyboardInterrupt:
         raise SystemExit("Simulation interrupted. Partial results and status were preserved.")
@@ -248,4 +252,5 @@ if __name__ == "__main__":
         sys.argv.append("--dry-run")
 
     main()
+
 

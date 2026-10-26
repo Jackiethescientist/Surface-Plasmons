@@ -227,6 +227,44 @@ The old generic sweep functionality is preserved for compatibility in
 recommended defect-line workflow. Frequency sampling inside one broadband run
 is still essential and is not the same as a parameter sweep.
 
+## Two solver workers (WSL/Linux)
+
+Add `--workers 2` to your usual command. The default remains one worker:
+
+```bash
+python scripts/run_single.py --config configs/perfect_line.json --name perfect_line_two_workers --workers 2
+python scripts/run_validation.py --simulation perfect_line_two_workers --name convergence --checks resolution,domain,time --workers 2
+python scripts/run_notes_sequence.py --stage single --workers 2
+python scripts/run_sweep.py --workers 2
+```
+
+For the particle-line workflow (`run_single`, `run_validation`, and
+`run_notes_sequence`), the two processes calculate the independent particle and
+substrate-only reference fields concurrently. The parent combines the completed
+fields and writes the experiment manifest. Narrowband maps follow the broadband
+scan, and adaptive resolution checks retain their order and early stopping.
+This does not change any physical parameters, tolerances, or validation scope.
+Changing worker count does not invalidate saved configurations or validation
+samples. A warm reference cache may leave only the particle calculation to run,
+so two workers do not guarantee a speedup.
+
+For the older generic sweep, workers run different broadband parameter points.
+Each child installs its own runtime estimator and reference-cache hooks.
+Selected resonance-field stages still run sequentially after the sweep.
+
+All workers use `spawn`, with numerical-library thread counts limited to one
+per child. Compatible references are protected by Linux/WSL file locks; disabling
+reference reuse creates separate reference directories. An interrupted or failed
+pool stops its other workers, and completed results remain available for resume.
+Do not launch these worker commands under `mpirun`; this is independent-process
+parallelism rather than MPI domain decomposition.
+
+Both simultaneous solvers need to fit in WSL RAM. The printed base-field memory
+estimate excludes some solver/DFT and analysis allocations; it is not a measured
+peak or a memory guarantee. With 16 GB physical RAM and about 7.4 GiB accessible
+to WSL, measure a demanding run before using two workers. Use `--workers 1` for
+cases whose combined memory would exceed the available budget.
+
 ## Interruption and naming
 
 - A new run refuses to use an existing result name.
@@ -256,4 +294,5 @@ is still essential and is not the same as a parameter sweep.
 ## License
 
 MIT. See `LICENSE`.
+
 

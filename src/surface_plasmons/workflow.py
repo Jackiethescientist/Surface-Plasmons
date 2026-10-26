@@ -10,12 +10,14 @@ import csv
 import json
 import math
 import shutil
+import uuid
 
 import numpy as np
 
 from .database import canonical_json, find_project_root
 from .materials import dielectric_function
 from .particle_line import particle_line_positions
+from .parallel import reference_lock, validate_workers, worker_pool
 from .project import (
     estimate_runtime,
     geometry_parameters,
@@ -185,6 +187,23 @@ def _run_reference(
         padding_um=padding_um,
     )
     cache_directory = _reference_directory(temporary_config)
+    if not cache_enabled:
+        # Disabled reuse must not overwrite a reference another worker reads.
+        cache_directory = cache_directory.with_name(
+            f"{cache_directory.name}__uncached_{uuid.uuid4().hex}"
+        )
+    with reference_lock(cache_directory.with_suffix(".lock")):
+        return _run_reference_locked(
+            project_config, cache_directory=cache_directory,
+            wavelength_um=wavelength_um, cache_enabled=cache_enabled,
+            resolution=resolution, padding_um=padding_um,
+        )
+
+
+def _run_reference_locked(
+    project_config, *, cache_directory, wavelength_um, cache_enabled,
+    resolution=None, padding_um=None,
+) -> StageFields:
     stage_directory = cache_directory / "stages" / "reference"
     complete_marker = cache_directory / "complete.json"
     if cache_enabled and complete_marker.is_file():
@@ -195,6 +214,7 @@ def _run_reference(
         except Exception as exc:
             print(f"Reference cache warning: {exc}; recalculating this entry.")
     cache_directory.mkdir(parents=True, exist_ok=True)
+    complete_marker.unlink(missing_ok=True)
     reference_config = make_simulation_config(
         project_config,
         experiment_directory=cache_directory,
@@ -217,6 +237,33 @@ def _run_reference(
         },
     )
     return fields
+
+
+def _reference_worker(payload):
+    project_config, options = payload
+    fields = _run_reference(project_config, **options)
+    # Transfer only the saved path, never full 3-D arrays through the pipe.
+    return str(fields.output_directory)
+
+
+def _run_field_pair(project_config, simulation_config, *, wavelength_um,
+                    cache_enabled, workers, resolution=None, padding_um=None):
+    """Run independent reference/particle solves; combine them in the parent."""
+    options = dict(wavelength_um=wavelength_um, cache_enabled=cache_enabled,
+                   resolution=resolution, padding_um=padding_um)
+    if workers == 1:
+        reference = _run_reference(project_config, **options)
+        return run_simulation(simulation_config), reference
+    with worker_pool(workers) as executor:
+        reference_job = executor.submit(_reference_worker, (dict(project_config), options))
+        particle_job = executor.submit(run_simulation, simulation_config)
+        # Observe either failure promptly, including an OOM-killed worker.
+        from concurrent.futures import as_completed
+        for job in as_completed((reference_job, particle_job)):
+            job.result()
+        result = particle_job.result()
+        reference_directory = reference_job.result()
+    return result, load_stage_fields(reference_directory)
 
 
 def _coordinate_grid(fields: StageFields) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -858,7 +905,9 @@ def run_broadband_stage(
     stage_prefix: str = "frequency_scan",
     resolution: int | None = None,
     padding_um: float | None = None,
+    workers: int = 1,
 ) -> tuple[SimulationResult | None, StageFields, StageFields, dict[str, Any]]:
+    validate_workers(workers)
     stage_name = f"{stage_prefix}/particle"
     simulation_config = make_simulation_config(
         project_config,
@@ -868,17 +917,14 @@ def run_broadband_stage(
         resolution=resolution,
         padding_um=padding_um,
     )
-    reference = _run_reference(
-        project_config,
-        wavelength_um=None,
-        cache_enabled=cache_enabled,
-        resolution=resolution,
-        padding_um=padding_um,
-    )
     previous_stage = workspace.manifest().get("stages", {}).get(stage_prefix, {})
     previous_directory = workspace.directory / "stages" / stage_name
     if previous_stage.get("status") == "completed":
         print(f"Resume: reusing completed stage {stage_prefix}")
+        reference = _run_reference(
+            project_config, wavelength_um=None, cache_enabled=cache_enabled,
+            resolution=resolution, padding_um=padding_um,
+        )
         actual = load_stage_fields(previous_directory)
         analysis = _save_broadband_results(project_config, actual, reference, workspace) if stage_prefix == "frequency_scan" else {}
         return None, actual, reference, analysis
@@ -886,7 +932,11 @@ def run_broadband_stage(
         simulation_config["run_id"] = f"{simulation_config['run_id']}__retry_{time_ns()}"
     print_stage_estimate("Broadband particle-line stage", simulation_config)
     workspace.record_stage(stage_prefix, "running", resolution=simulation_config["resolution"])
-    result = run_simulation(simulation_config)
+    result, reference = _run_field_pair(
+        project_config, simulation_config, wavelength_um=None,
+        cache_enabled=cache_enabled, workers=workers,
+        resolution=resolution, padding_um=padding_um,
+    )
     actual = load_stage_fields(result.output_directory or workspace.directory / "stages" / stage_name)
     analysis = _save_broadband_results(project_config, actual, reference, workspace) if stage_prefix == "frequency_scan" else {}
     workspace.record_stage(stage_prefix, "completed", output_directory=result.output_directory, elapsed_seconds=result.elapsed_seconds)
@@ -900,7 +950,9 @@ def run_project(
     resume: bool = False,
     cache_enabled: bool = True,
     field_map_selection: str | Sequence[float] | None = None,
+    workers: int = 1,
 ) -> ExperimentWorkspace:
+    validate_workers(workers)
     config = normalise_project_config(project_config)
     from .validated_scope import enforce_validated_project
     enforce_validated_project(config, field_map_selection=field_map_selection)
@@ -917,7 +969,7 @@ def run_project(
     try:
         _save_geometry(config, workspace)
         _, _, _, broadband = run_broadband_stage(
-            config, workspace, cache_enabled=cache_enabled
+            config, workspace, cache_enabled=cache_enabled, workers=workers
         )
         selection = field_map_selection
         if selection is None:
@@ -958,8 +1010,10 @@ def run_project(
                 simulation_config["run_id"] = f"{simulation_config['run_id']}__retry_{time_ns()}"
             print_stage_estimate(f"Narrowband field map {index}/{len(wavelengths_nm)}", simulation_config)
             workspace.record_stage(stage, "running", wavelength_nm=wavelength_nm)
-            reference = _run_reference(config, wavelength_um=wavelength_um, cache_enabled=cache_enabled)
-            result = run_simulation(simulation_config)
+            result, reference = _run_field_pair(
+                config, simulation_config, wavelength_um=wavelength_um,
+                cache_enabled=cache_enabled, workers=workers,
+            )
             actual = load_stage_fields(result.output_directory or workspace.directory / "stages" / stage)
             report = _save_field_map(wavelength_nm, actual, reference, workspace, config)
             map_reports.append(report)
@@ -1023,4 +1077,5 @@ __all__ = [
     "run_broadband_stage",
     "run_project",
 ]
+
 
