@@ -12,7 +12,6 @@ import numpy as np
 from .database import find_project_root
 from .notes_theory import FORMULAS, field_matrix, pair_couplings, polarizability, solve
 from .particle_line import particle_line_positions
-from .parallel import validate_workers
 from .project import PRECISION_MODES, geometry_parameters, normalise_project_config
 from .results import ExperimentWorkspace, config_hash, safe_simulation_name
 
@@ -496,7 +495,7 @@ def _cached_samples(saved, marker, signature):
 
 
 def _convergence(config, experiment, output, kind, values, cache_enabled, *, adaptive_resolution=True,
-                 mirror_symmetry=False, workers=1):
+                 mirror_symmetry=False):
     from .workflow import run_broadband_stage
     resonance_required = _resonance_required(config)
     if config["measurement"]["normalization_mode"] != "global_complex_reference":
@@ -562,8 +561,7 @@ def _convergence(config, experiment, output, kind, values, cache_enabled, *, ada
                 sources.append("saved_convergence_samples")
             else:
                 workspace = ExperimentWorkspace.create(candidate["simulation_name"], candidate, results_root=runroot, resume=target.exists())
-                _, actual, reference, _ = run_broadband_stage(
-                    candidate, workspace, cache_enabled=cache_enabled, workers=workers)
+                _, actual, reference, _ = run_broadband_stage(candidate, workspace, cache_enabled=cache_enabled)
                 response = _sample_response(actual, reference, candidate, points)
                 wavelengths = actual.wavelengths_um * 1000
                 np.savez_compressed(saved, wavelengths=wavelengths, fields=response)
@@ -657,8 +655,7 @@ def run_validation(experiment: str | Path, *, validation_name="notes_validation_
                    checks: Sequence[str] = ("configuration", "theory"), results_root=None,
                    resolutions=None, paddings_um=None, time_factors=None, cache_enabled=True,
                    tolerance=0.05, peak_tolerance=0.02, adaptive_resolution=True,
-                   mirror_symmetry=False, workers=1) -> Path:
-    validate_workers(workers)
+                   mirror_symmetry=False) -> Path:
     directory = resolve_experiment(experiment, results_root)
     config = normalise_project_config(json.loads((directory / "config_resolved.json").read_text(encoding="utf-8")))
     selected = {str(v).strip().lower() for v in checks}
@@ -704,7 +701,7 @@ def run_validation(experiment: str | Path, *, validation_name="notes_validation_
         if kind in selected:
             reports[kind] = _convergence(config, directory, output, kind, values, cache_enabled,
                                          adaptive_resolution=adaptive_resolution,
-                                         mirror_symmetry=mirror_symmetry, workers=workers)
+                                         mirror_symmetry=mirror_symmetry)
     reports["numerical_check_availability"] = {
         kind: {"status": "computed_in_this_analysis" if kind in selected else
                          ("loaded_compatible_saved_check" if kind in reports else "not_requested_no_compatible_saved_report_found"),
@@ -746,4 +743,3 @@ def run_validation(experiment: str | Path, *, validation_name="notes_validation_
              "The inverse dipole fit is conditional on the electrostatic model. Antisymmetric pair modes are theory predictions unless separately excited."]
     (output / "comparison_summary.md").write_text("\n".join(text)+"\n", encoding="utf-8")
     return output
-
