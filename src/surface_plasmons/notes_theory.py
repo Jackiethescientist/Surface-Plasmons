@@ -71,3 +71,4 @@ def field_matrix(points_um, positions_um, epsilon_host: complex = 1.0) -> np.nda
 def pair_couplings(distance_um: float, epsilon_host: complex = 1.0):
     scale = 1 / (4 * np.pi * epsilon_host * distance_um**3)
     return {"longitudinal": 2 * scale, "transverse": -scale}
+
