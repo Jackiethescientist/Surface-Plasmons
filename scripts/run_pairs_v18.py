@@ -13,6 +13,15 @@ from argparse import ArgumentParser
 from pathlib import Path
 import json
 import os
+import sys
+
+# Script execution otherwise searches scripts/ and the installed package, which
+# may be an editable install pointing at another checkout of this project.
+_LOCAL_SOURCE = Path(__file__).resolve().parents[1] / 'src'
+if not (_LOCAL_SOURCE / 'surface_plasmons' / '__init__.py').is_file():
+    raise SystemExit('Project source is missing. Merge all contents of code/ into your existing '
+                     'project root so scripts/ and src/surface_plasmons/ are alongside each other.')
+sys.path.insert(0, str(_LOCAL_SOURCE))
 
 try:
     from .run_control_v16 import (ControlJob, GIB, available_memory_bytes, execute_jobs,
@@ -26,6 +35,13 @@ from surface_plasmons.project import (estimate_runtime, load_project_config,
 from surface_plasmons.results import config_hash, safe_simulation_name
 from surface_plasmons.validated_scope import enforce_validated_project
 from surface_plasmons.workflow import _reference_signature
+from surface_plasmons import project as _project_source
+
+if not getattr(_project_source, 'RESEARCH_DIELECTRIC_LINE_SUPPORTED', False):
+    raise SystemExit('Pair launch failed: the source in ' + str(Path(_project_source.__file__).resolve())
+                     + ' does not include the v18 research extension. Merge every file from '
+                     'the updated code/src/ folder into this project, including project.py, '
+                     'simulation.py, validated_scope.py and research_scope.py.')
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -92,6 +108,7 @@ def main(argv=None):
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args(argv)
+    print('Project source: ' + str(Path(_project_source.__file__).resolve()), flush=True)
     for key in ('OMPI_COMM_WORLD_SIZE', 'PMI_SIZE', 'PMIX_SIZE', 'MV2_COMM_WORLD_SIZE'):
         if int(os.environ.get(key, '1')) > 1:
             raise ValueError('Run the launcher directly with python, without mpirun.')

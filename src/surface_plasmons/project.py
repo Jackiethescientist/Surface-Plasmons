@@ -21,6 +21,10 @@ class ProjectConfigError(ValueError):
     """Raised before MEEP starts when a project configuration is invalid."""
 
 
+# An execution capability marker; it is not a numerical-validation claim.
+RESEARCH_DIELECTRIC_LINE_SUPPORTED = True
+
+
 PRECISION_MODES: dict[str, dict[str, float | int]] = {
     "fast": {
         "broadband_resolution": 60,
@@ -192,8 +196,10 @@ def normalise_project_config(
             value = spec.epsilon if spec.epsilon is not None else (
                 spec.refractive_index**2 if spec.refractive_index is not None else None)
             return not spec.is_dispersive and value is not None and value > 0
-        if (geometry["particle_shape"] != "sphere" or geometry["particle_count"] != 1
-                or geometry.get("defects") or not all(positive_constant(s) for s in specs)
+        research = result['numerics'].get('execution_scope') == 'research_dielectric_line'
+        if (geometry["particle_shape"] != "sphere"
+                or ((geometry["particle_count"] != 1 or geometry.get("defects")) and not research)
+                or not all(positive_constant(s) for s in specs)
                 or specs[1].key != specs[2].key or specs[0].key == specs[1].key):
             raise ProjectConfigError("The nonresonant dielectric benchmark requires one constant positive-permittivity sphere in a uniform, different constant host, without defects. It cannot disable gold resonance checks.")
     if float(measurement["probe_offset_from_particle_surface_um"]) < 0:
@@ -350,7 +356,7 @@ def make_simulation_config(
         "padding_um": selected_padding,
         "pml_thickness_um": float(numerics["pml_thickness_um"]),
         "courant": float(numerics["courant"]),
-        "progress_interval": 1.0e9,
+        "progress_interval": float(numerics.get("progress_interval", 1.0e9)),
         "stop_method": "dft_decay",
         "dft_decay_tolerance": float(profile["dft_decay_tolerance"]),
         "minimum_run_time": float(profile["minimum_run_time"]),
@@ -383,7 +389,9 @@ def make_simulation_config(
         "run_name": f"{name} — {stage_name}",
         "run_id": f"{slug}__{safe_simulation_name(stage_name)}",
         "record_database": bool(numerics["record_database"]),
-        "tags": ["particle-line", "3d", "substrate", f"precision:{config['precision']}", stage_name],
+        "tags": ["particle-line", "3d", "substrate", f"precision:{config['precision']}", stage_name]
+                + (["execution:research_dielectric_line"]
+                   if numerics.get("execution_scope") == "research_dielectric_line" else []),
     }
 
 

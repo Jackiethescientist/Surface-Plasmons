@@ -41,6 +41,12 @@ def _reject(errors):
 
 def enforce_validated_project(config, *, field_map_selection=None):
     """Check project-only settings before creating any experiment directory."""
+    scope = config['numerics'].get('execution_scope', 'validated_control')
+    if scope == 'research_dielectric_line':
+        from .research_scope import enforce_research_project
+        return enforce_research_project(config, field_map_selection=field_map_selection)
+    if scope != 'validated_control':
+        raise ValidatedScopeError('Unknown numerics.execution_scope: ' + repr(scope))
     from .project import make_simulation_config
     from .simulation import validate_config
     errors = []
@@ -68,6 +74,9 @@ def enforce_validated_project(config, *, field_map_selection=None):
 
 def enforce_validated_simulation(cfg):
     """Gate low-level execution as well as project runs and sweep candidates."""
+    if 'execution:research_dielectric_line' in cfg.tags:
+        from .research_scope import enforce_research_simulation
+        return enforce_research_simulation(cfg)
     errors = []
     for name, expected in {'geometry_name':'particle_line_on_substrate','dimensions':3,
             'pml_thickness_um':.2,'courant':.45,'k_point':(0.,0.,0.),

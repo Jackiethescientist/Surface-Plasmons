@@ -5,6 +5,14 @@ Identical reruns reuse the same validation folder and completed numerical cases.
 from __future__ import annotations
 from argparse import ArgumentParser
 from pathlib import Path
+import sys
+
+_LOCAL_SOURCE = Path(__file__).resolve().parents[1] / 'src'
+if not (_LOCAL_SOURCE / 'surface_plasmons' / '__init__.py').is_file():
+    raise SystemExit('Project source is missing. Merge code/ into your existing project root; '
+                     'scripts/ and src/surface_plasmons/ must be alongside each other.')
+sys.path.insert(0, str(_LOCAL_SOURCE))
+
 from surface_plasmons.validation import ValidationError, run_validation
 from surface_plasmons.results import ResultsError
 

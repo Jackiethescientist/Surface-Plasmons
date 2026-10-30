@@ -20,6 +20,13 @@ import subprocess
 import sys
 import time
 
+# Keep this launcher and every spawned worker on the same local source tree.
+_LOCAL_SOURCE = Path(__file__).resolve().parents[1] / 'src'
+if not (_LOCAL_SOURCE / 'surface_plasmons' / '__init__.py').is_file():
+    raise SystemExit('Project source is missing. Merge code/ into your existing project root; '
+                     'scripts/ and src/surface_plasmons/ must be alongside each other.')
+sys.path.insert(0, str(_LOCAL_SOURCE))
+
 from surface_plasmons.project import (
     estimate_runtime, load_project_config, make_simulation_config,
     normalise_project_config,
@@ -138,11 +145,13 @@ def stop_children(active: list[tuple[ControlJob, subprocess.Popen, Any]]) -> Non
         handle.close()
 
 
-def execute_jobs(jobs: list[ControlJob], *, root: Path, batch: Path, workers: int) -> int:
+def execute_jobs(jobs: list[ControlJob], *, root: Path, batch: Path, workers: int,
+                 heartbeat_seconds: float = 0) -> int:
     """Use fresh Python processes: Meep state is never shared between jobs."""
     pending = [job for job in jobs if not job.reuse]
     active: list[tuple[ControlJob, subprocess.Popen, Any]] = []
     failed = False
+    last_heartbeat = time.monotonic()
     try:
         while pending or active:
             while pending and len(active) < workers and not failed:
@@ -175,6 +184,20 @@ def execute_jobs(jobs: list[ControlJob], *, root: Path, batch: Path, workers: in
                     print(f"{job.polarisation}: {'finished' if code == 0 else f'FAILED (exit {code})'}", flush=True)
             if failed:
                 pending.clear()
+            if active and heartbeat_seconds > 0 and time.monotonic() - last_heartbeat >= heartbeat_seconds:
+                for job, process, _ in active:
+                    log_path = batch / f"{job.polarisation.lower()}.log"
+                    latest = ''
+                    try:
+                        with log_path.open('rb') as reader:
+                            reader.seek(0, 2)
+                            reader.seek(max(0, reader.tell() - 2048))
+                            lines = reader.read().decode('utf-8', errors='replace').splitlines()
+                        latest = next((line.strip() for line in reversed(lines) if line.strip()), '')
+                    except OSError:
+                        pass
+                    print(f"{job.polarisation}: process {process.pid} still active; latest log: {latest[:220]}", flush=True)
+                last_heartbeat = time.monotonic()
             if active:
                 time.sleep(0.2)
     except BaseException:

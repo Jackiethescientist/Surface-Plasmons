@@ -19,6 +19,13 @@ from pathlib import Path
 from typing import Any
 import csv
 import json
+import sys
+
+_LOCAL_SOURCE = Path(__file__).resolve().parents[1] / 'src'
+if not (_LOCAL_SOURCE / 'surface_plasmons' / '__init__.py').is_file():
+    raise SystemExit('Project source is missing. Merge code/ into your existing project root; '
+                     'scripts/ and src/surface_plasmons/ must be alongside each other.')
+sys.path.insert(0, str(_LOCAL_SOURCE))
 
 from surface_plasmons.project import (
     ProjectConfigError,
@@ -103,7 +110,13 @@ def _write_automatic_validation_file(
         "schema_version": 2,
         "simulation_name": config["simulation_name"],
         "simulation_variables": config,
-        "overall_validation_status": theory.get("overall_status", "not_validated"),
+        "overall_validation_status": reports.get("overall", {}).get("status", "not_validated"),
+        "theory_agreement_status": theory.get("agreement_status", "not_evaluated"),
+        "model_applicability_status": theory.get("applicability_status", "not_evaluated"),
+        "numerical_convergence_status": {
+            kind: reports.get(kind, {}).get("convergence_status", "not_established")
+            for kind in ("resolution", "domain", "time")
+        },
         "validation_scope": {
             "automatic_checks": ["configuration", "theory"],
             "uses_existing_meep_results": True,

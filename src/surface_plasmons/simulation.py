@@ -406,6 +406,16 @@ def benchmark_mirror_planes(cfg: SimulationConfig) -> tuple[tuple[str, int], ...
         raise SimulationConfigError("mirror_symmetry must be true or false.")
     if not cfg.mirror_symmetry:
         return ()
+    if 'execution:research_dielectric_line' in cfg.tags:
+        from .research_scope import enforce_research_simulation, symmetric_research_positions
+        enforce_research_simulation(cfg)
+        if not symmetric_research_positions(cfg.geometry_parameters):
+            raise SimulationConfigError(
+                'mirror_symmetry requires the complete research geometry to be symmetric '
+                'under x and z reflection. Disable mirrors for an asymmetric defect.'
+            )
+        component_axis = cfg.source.component[-1].lower()
+        return tuple((axis, -1 if component_axis == axis else 1) for axis in ('x', 'z'))
     parameters = cfg.geometry_parameters
     center = parameters.get("center", (0., 0., 0.))
     source_center = cfg.source.center_um or (0., 0., 0.)

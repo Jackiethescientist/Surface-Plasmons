@@ -1,0 +1,80 @@
+Simulation: pair60_ez
+Configuration: /mnt/c/Users/jacqu/OneDrive/Documents/Surface_Plasmons/data/control_batches/pair60/ez_config.json
+Precision: fast
+Particles: 2 active of 2 nominal sphere(s)
+Broadband estimate: 1.8 h to 8.9 h; 2,400,930 grid cells.
+Narrowband field maps: none
+Reference reuse: enabled
+Automatic theory validation: enabled
+Substrate-only reference: approximately 1.8 h to 8.9 h; 2,400,930 grid cells; about 0.53 GB base field memory.
+-----------
+Initializing structure...
+Warning: grid volume is not an integer number of pixels; cell size will be rounded to nearest pixel.
+Halving computational cell along direction x
+Halving computational cell along direction z
+time for choose_chunkdivision = 0.00207996 s
+Working in 3D dimensions.
+Computational cell is 0.74 x 0.7 x 0.68 with resolution 300
+     block, center = (0,-0.01,0)
+          size (1e+20,0.02,1e+20)
+          axes (1,0,0), (0,1,0), (0,0,1)
+          dielectric constant epsilon diagonal = (1,1,1)
+time for set_epsilon = 7.01766 s
+-----------
+on time step 1 (time=0.0015), 7.60662 s/step
+on time step 45 (time=0.0675), 0.0919103 s/step
+on time step 88 (time=0.132), 0.0938445 s/step
+on time step 133 (time=0.1995), 0.0894263 s/step
+on time step 174 (time=0.261), 0.0978367 s/step
+on time step 216 (time=0.324), 0.095647 s/step
+on time step 261 (time=0.3915), 0.089663 s/step
+on time step 305 (time=0.4575), 0.0912602 s/step
+on time step 347 (time=0.5205), 0.0960419 s/step
+on time step 390 (time=0.585), 0.0935318 s/step
+on time step 434 (time=0.651), 0.0922935 s/step
+on time step 480 (time=0.72), 0.0886795 s/step
+on time step 524 (time=0.786), 0.091224 s/step
+on time step 572 (time=0.858), 0.0840534 s/step
+on time step 618 (time=0.927), 0.0882368 s/step
+on time step 664 (time=0.996), 0.0885669 s/step
+on time step 708 (time=1.062), 0.0929337 s/step
+on time step 752 (time=1.128), 0.0917376 s/step
+on time step 795 (time=1.1925), 0.0947703 s/step
+on time step 843 (time=1.2645), 0.0849676 s/step
+on time step 889 (time=1.3335), 0.0873021 s/step
+on time step 935 (time=1.4025), 0.0885174 s/step
+on time step 980 (time=1.47), 0.0898232 s/step
+on time step 1020 (time=1.53), 0.102292 s/step
+on time step 1064 (time=1.596), 0.0927329 s/step
+on time step 1108 (time=1.662), 0.0925146 s/step
+on time step 1150 (time=1.725), 0.0957739 s/step
+on time step 1192 (time=1.788), 0.0965984 s/step
+on time step 1239 (time=1.8585), 0.0865822 s/step
+on time step 1284 (time=1.926), 0.0904613 s/step
+on time step 1331 (time=1.9965), 0.0860301 s/step
+on time step 1377 (time=2.0655), 0.0873725 s/step
+on time step 1422 (time=2.133), 0.0898392 s/step
+on time step 1467 (time=2.2005), 0.0896565 s/step
+on time step 1514 (time=2.271), 0.0864679 s/step
+on time step 1561 (time=2.3415), 0.0855906 s/step
+on time step 1608 (time=2.412), 0.0861788 s/step
+on time step 1647 (time=2.4705), 0.103469 s/step
+on time step 1691 (time=2.5365), 0.0918726 s/step
+on time step 1738 (time=2.607), 0.0866366 s/step
+on time step 1785 (time=2.6775), 0.08688 s/step
+on time step 1831 (time=2.7465), 0.0875202 s/step
+on time step 1877 (time=2.8155), 0.0882515 s/step
+on time step 1894 (time=2.841), 0.273689 s/step
+on time step 1915 (time=2.8725), 0.193607 s/step
+on time step 1959 (time=2.9385), 0.0913214 s/step
+on time step 2002 (time=3.003), 0.094638 s/step
+on time step 2047 (time=3.0705), 0.0905944 s/step
+on time step 2093 (time=3.1395), 0.0875079 s/step
+on time step 2139 (time=3.2085), 0.0873592 s/step
+on time step 2183 (time=3.2745), 0.092585 s/step
+on time step 2225 (time=3.3375), 0.0954361 s/step
+on time step 2266 (time=3.399), 0.098646 s/step
+on time step 2305 (time=3.4575), 0.103276 s/step
+on time step 2348 (time=3.522), 0.0943027 s/step
+on time step 2390 (time=3.585), 0.0969595 s/step
+on time step 2428 (time=3.642), 0.107456 s/step
