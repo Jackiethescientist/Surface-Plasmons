@@ -23,6 +23,7 @@ class ProjectConfigError(ValueError):
 
 # An execution capability marker; it is not a numerical-validation claim.
 RESEARCH_DIELECTRIC_LINE_SUPPORTED = True
+RESEARCH_PARTIAL_MIRRORS_SUPPORTED = True
 
 
 PRECISION_MODES: dict[str, dict[str, float | int]] = {
@@ -352,6 +353,8 @@ def make_simulation_config(
         "resolution": selected_resolution,
         **({"mirror_symmetry": numerics["mirror_symmetry"]}
            if "mirror_symmetry" in numerics else {}),
+        **({'mirror_axes': list(numerics['mirror_axes'])}
+           if 'mirror_axes' in numerics else {}),
         "cell_size_um": selected_cell,
         "padding_um": selected_padding,
         "pml_thickness_um": float(numerics["pml_thickness_um"]),
@@ -402,10 +405,11 @@ def estimate_runtime(config: Mapping[str, Any]) -> dict[str, float | int | str]:
     grid_shape = [max(1, math.ceil(value * resolution)) for value in cell]
     full_grid = math.prod(grid_shape)
     if simulation.get("mirror_symmetry", False):
-        from .simulation import validate_config
+        from .simulation import benchmark_mirror_planes, validate_config
         # The estimate must not promise a reduction for an unsupported setup.
-        validate_config(simulation)
-        for axis in (0, 2):
+        validated = validate_config(simulation)
+        for name, _ in benchmark_mirror_planes(validated):
+            axis = {'x': 0, 'z': 2}[name]
             grid_shape[axis] = math.ceil(grid_shape[axis] / 2)
     grid = math.prod(grid_shape)
     courant = float(simulation.get("courant", 0.45))

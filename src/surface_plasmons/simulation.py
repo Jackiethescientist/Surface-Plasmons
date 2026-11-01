@@ -212,6 +212,7 @@ class SimulationConfig:
     k_point: tuple[float, float, float] = (0.0, 0.0, 0.0)
     force_complex_fields: bool = False
     mirror_symmetry: bool = False
+    mirror_axes: tuple[str, ...] | None = None
     progress_interval: float = 4.0
     stop_method: str = "dft_decay"       # dft_decay, field_decay, fixed_time
     dft_decay_tolerance: float = 1e-8
@@ -279,6 +280,11 @@ class SimulationConfig:
             data["k_point"] = _vector3(data["k_point"], "k_point")
         if "tags" in data:
             data["tags"] = tuple(str(tag) for tag in data["tags"])
+        if data.get('mirror_axes') is not None:
+            axes = data['mirror_axes']
+            if not isinstance(axes, (list, tuple)):
+                raise SimulationConfigError('mirror_axes must be a list containing x and/or z.')
+            data['mirror_axes'] = tuple(str(axis).lower() for axis in axes)
         if "geometry_parameters" in data:
             data["geometry_parameters"] = dict(data["geometry_parameters"] or {})
 
@@ -342,6 +348,9 @@ class SimulationConfig:
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
+        # Preserve the serialized identity of every earlier default case.
+        if value['mirror_axes'] is None:
+            value.pop('mirror_axes')
         return _jsonable(value)
 
 
@@ -404,18 +413,28 @@ def benchmark_mirror_planes(cfg: SimulationConfig) -> tuple[tuple[str, int], ...
     """
     if not isinstance(cfg.mirror_symmetry, bool):
         raise SimulationConfigError("mirror_symmetry must be true or false.")
+    if cfg.mirror_axes is not None:
+        if (not isinstance(cfg.mirror_axes, (list, tuple)) or not cfg.mirror_axes
+                or len(set(cfg.mirror_axes)) != len(cfg.mirror_axes)
+                or any(axis not in {'x', 'z'} for axis in cfg.mirror_axes)):
+            raise SimulationConfigError('mirror_axes must contain distinct x and/or z axes.')
+        if not cfg.mirror_symmetry:
+            raise SimulationConfigError('Explicit mirror_axes requires mirror_symmetry=true.')
+        if 'execution:research_dielectric_line' not in cfg.tags:
+            raise SimulationConfigError('Explicit mirror_axes is supported only for research dielectric lines.')
     if not cfg.mirror_symmetry:
         return ()
     if 'execution:research_dielectric_line' in cfg.tags:
         from .research_scope import enforce_research_simulation, symmetric_research_positions
         enforce_research_simulation(cfg)
-        if not symmetric_research_positions(cfg.geometry_parameters):
+        axes = cfg.mirror_axes if cfg.mirror_axes is not None else ('x', 'z')
+        if not symmetric_research_positions(cfg.geometry_parameters, axes=tuple({'x':0, 'z':2}[axis] for axis in axes)):
             raise SimulationConfigError(
                 'mirror_symmetry requires the complete research geometry to be symmetric '
-                'under x and z reflection. Disable mirrors for an asymmetric defect.'
+                'under every requested reflection. For an x displacement, request mirror_axes=["z"].'
             )
         component_axis = cfg.source.component[-1].lower()
-        return tuple((axis, -1 if component_axis == axis else 1) for axis in ('x', 'z'))
+        return tuple((axis, -1 if component_axis == axis else 1) for axis in axes)
     parameters = cfg.geometry_parameters
     center = parameters.get("center", (0., 0., 0.))
     source_center = cfg.source.center_um or (0., 0., 0.)

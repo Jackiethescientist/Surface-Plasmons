@@ -78,6 +78,7 @@ def enforce_validated_simulation(cfg):
         from .research_scope import enforce_research_simulation
         return enforce_research_simulation(cfg)
     errors = []
+    _require(cfg.mirror_axes, None, 'mirror_axes', errors)
     for name, expected in {'geometry_name':'particle_line_on_substrate','dimensions':3,
             'pml_thickness_um':.2,'courant':.45,'k_point':(0.,0.,0.),
             'force_complex_fields':False,'mirror_symmetry':True,'stop_method':'dft_decay'}.items():

@@ -32,15 +32,16 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 COMPONENTS = ('Ex', 'Ey', 'Ez')
 
 
-def read_run(directory, expected_count):
+def read_run(directory, expected_count, *, expected_spacing_nm=80, expected_central_shift_nm=None):
     config = normalise_project_config(json.loads((directory / 'config_resolved.json').read_text(encoding='utf-8')))
     g, source, measurement = config['geometry'], config['source'], config['measurement']
-    if (g['particle_count'] != expected_count or g['particle_shape'] != 'sphere' or g.get('defects')
+    if (g['particle_count'] != expected_count or g['particle_shape'] != 'sphere'
+            or (g.get('defects') and expected_central_shift_nm is None)
             or g['particle_material'] != 'glass_constant'
             or g['background_material'] != 'vacuum' or g['substrate_material'] != 'vacuum'
             or not np.isclose(g['particle_radius_um'], .02)
-            or (expected_count > 1 and not np.isclose(g['spacing_um'], .08))):
-        raise ValueError(f'{directory}: expected a perfect N={expected_count}, 20 nm radius glass/vacuum chain at 80 nm spacing.')
+            or (expected_count > 1 and not np.isclose(g['spacing_um'], expected_spacing_nm / 1000))):
+        raise ValueError(f'{directory}: expected a perfect N={expected_count}, 20 nm radius glass/vacuum chain at {expected_spacing_nm:g} nm spacing.')
     if (source['propagation_axis'] != 'y' or source['propagation_direction'] != -1
             or source['polarisation'] not in ('Ex', 'Ez')
             or not np.allclose(source['wavelength_range_nm'], [1000, 1200])
@@ -56,6 +57,15 @@ def read_run(directory, expected_count):
         raise ValueError(f'{path}: no saved field data.')
     positions = particle_line_positions({**geometry_parameters(config, include_particles=True), 'center': (0., 0., 0.)})
     centres = np.array([(p.actual_x_um, p.actual_y_um, p.actual_z_um) for p in positions])
+    if expected_central_shift_nm is not None:
+        if (expected_count != 5 or expected_spacing_nm != 80
+                or expected_central_shift_nm not in (0, 4, 8, 16)):
+            raise ValueError('The central-defect comparison requires N=5, d=80 nm and shifts 0,4,8,16 nm.')
+        expected = (np.arange(5)-2)*.08
+        expected[2] += expected_central_shift_nm/1000
+        if (len(centres) != 5 or not np.allclose(centres[:, 0], expected, rtol=0, atol=1e-12)
+                or not np.allclose(centres[:, 1:], [.02, 0], rtol=0, atol=1e-12)):
+            raise ValueError(f'{directory}: the occupied sphere positions do not match a +{expected_central_shift_nm:g} nm shift of index 2.')
     coordinates = np.array([[float(r[f'{c}_um']) for c in 'xyz'] for r in rows])
     if not np.allclose(coordinates[:, 1:], centres[0, 1:], rtol=0, atol=1e-8):
         raise ValueError(f'{directory}: expected the same y/z plane as the sphere centres.')
@@ -82,6 +92,8 @@ def read_run(directory, expected_count):
     automatic = json.loads(automatic_path.read_text(encoding='utf-8')) if automatic_path.is_file() else {}
     theory = automatic.get('validation_reports', {}).get('theory', {})
     return dict(directory=directory, config=config, count=expected_count, coordinates=coordinates,
+                spacing_nm=float(g['spacing_um']*1000) if expected_count > 1 else None,
+                central_shift_nm=float(expected_central_shift_nm) if expected_central_shift_nm is not None else None,
                 wavelengths=wavelengths, grid=np.unique(wavelengths), values=values, centres=centres,
                 first_x=float(np.min(centres[:, 0])), radius=float(g['particle_radius_um']),
                 resolution=float(profile['broadband_resolution']),
@@ -91,9 +103,9 @@ def read_run(directory, expected_count):
                                            for kind in ('resolution', 'domain', 'time')}))
 
 
-def compare_runs(runs, offsets_nm):
-    if [r['count'] for r in runs] != [1, 2, 3, 5]:
-        raise ValueError('Supply the four counts in order N=1,2,3,5.')
+def compare_runs(runs, offsets_nm, *, expected_counts=(1, 2, 3, 5)):
+    if [r['count'] for r in runs] != list(expected_counts):
+        raise ValueError(f'Supply particle counts in order {list(expected_counts)}.')
     offsets = np.asarray(offsets_nm, dtype=float) / 1000
     if not len(offsets) or not np.all(np.isfinite(offsets)) or np.any(offsets >= 0):
         raise ValueError('Offsets must be finite, negative distances to the left of the first sphere.')
@@ -129,6 +141,7 @@ def compare_runs(runs, offsets_nm):
                                 + 1j * np.interp(offsets, x, values[:, j].imag) for j in range(3)], axis=-1)
             for offset, field in zip(offsets, sampled):
                 row = dict(particle_count=run['count'], polarisation=pol, wavelength_nm=float(wavelength),
+                           centre_spacing_nm=run['spacing_nm'],
                            offset_from_leftmost_centre_nm=float(offset*1000),
                            original_x_nm=float((run['first_x']+offset)*1000),
                            y_nm=float(run['centres'][0, 1]*1000), z_nm=float(run['centres'][0, 2]*1000),

@@ -48,11 +48,11 @@ def _geometry(parameters):
             raise ValueError('Research shifts must be along x and no greater than 20% of spacing.')
 
 
-def symmetric_research_positions(parameters):
+def symmetric_research_positions(parameters, *, axes=(0, 2)):
     """Check actual occupied centres, including every vacancy or displacement."""
     points = np.asarray([(p.actual_x_um, p.actual_y_um, p.actual_z_um)
                          for p in particle_line_positions(parameters)])
-    for axis in (0, 2):
+    for axis in axes:
         reflected = points.copy()
         reflected[:, axis] *= -1
         if any(not np.any(np.all(np.isclose(points, p, rtol=0, atol=1e-12), axis=1)) for p in reflected):
