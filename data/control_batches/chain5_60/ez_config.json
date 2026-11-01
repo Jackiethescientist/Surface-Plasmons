@@ -1,0 +1,63 @@
+{
+  "simulation_name": "chain5_60_ez",
+  "precision": "fast",
+  "geometry": {
+    "particle_shape": "sphere",
+    "particle_count": 5,
+    "particle_material": "glass_constant",
+    "background_material": "vacuum",
+    "substrate_material": "vacuum",
+    "particle_radius_um": 0.02,
+    "cube_size_um": 0.08,
+    "spacing_um": 0.06,
+    "substrate_thickness_um": 0.02,
+    "surface_y_um": 0.0,
+    "particle_surface_gap_um": 0.0,
+    "defects": []
+  },
+  "source": {
+    "wavelength_range_nm": [
+      1000.0,
+      1200.0
+    ],
+    "propagation_axis": "y",
+    "propagation_direction": -1,
+    "polarisation": "Ez",
+    "span_pml": true
+  },
+  "measurement": {
+    "field_components": [
+      "Ex",
+      "Ey",
+      "Ez"
+    ],
+    "probe_margin_um": 0.04,
+    "probe_offset_from_particle_surface_um": 0.0,
+    "normalization_mode": "global_complex_reference",
+    "field_map_margin_um": 0.1,
+    "field_map_height_um": 0.3,
+    "field_map_depth_um": 0.3,
+    "field_map_frequencies": "none",
+    "maximum_auto_field_maps": 1,
+    "probe_line_y_um": 0.02,
+    "validation_region": "all_exterior",
+    "validation_benchmark": "nonresonant_dielectric"
+  },
+  "numerics": {
+    "padding_um": 0.12,
+    "pml_thickness_um": 0.2,
+    "courant": 0.45,
+    "record_database": false,
+    "allow_out_of_range_materials": false,
+    "allow_unstable_materials": false,
+    "broadband_resolution": 300,
+    "field_resolution": 300,
+    "nfreq": 21,
+    "minimum_run_time": 20.0,
+    "maximum_run_time": 100.0,
+    "dft_decay_tolerance": 1e-05,
+    "mirror_symmetry": true,
+    "execution_scope": "research_dielectric_line",
+    "progress_interval": 10.0
+  }
+}
