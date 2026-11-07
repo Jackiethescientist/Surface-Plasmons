@@ -32,11 +32,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 COMPONENTS = ('Ex', 'Ey', 'Ez')
 
 
-def read_run(directory, expected_count, *, expected_spacing_nm=80, expected_central_shift_nm=None):
+def read_run(directory, expected_count, *, expected_spacing_nm=80, expected_central_shift_nm=None,
+             expected_vacancy_index=None):
+    if expected_central_shift_nm is not None and expected_vacancy_index is not None:
+        raise ValueError('Request either a displacement or a vacancy check.')
     config = normalise_project_config(json.loads((directory / 'config_resolved.json').read_text(encoding='utf-8')))
     g, source, measurement = config['geometry'], config['source'], config['measurement']
     if (g['particle_count'] != expected_count or g['particle_shape'] != 'sphere'
-            or (g.get('defects') and expected_central_shift_nm is None)
+            or (g.get('defects') and expected_central_shift_nm is None and expected_vacancy_index is None)
             or g['particle_material'] != 'glass_constant'
             or g['background_material'] != 'vacuum' or g['substrate_material'] != 'vacuum'
             or not np.isclose(g['particle_radius_um'], .02)
@@ -57,6 +60,13 @@ def read_run(directory, expected_count, *, expected_spacing_nm=80, expected_cent
         raise ValueError(f'{path}: no saved field data.')
     positions = particle_line_positions({**geometry_parameters(config, include_particles=True), 'center': (0., 0., 0.)})
     centres = np.array([(p.actual_x_um, p.actual_y_um, p.actual_z_um) for p in positions])
+    if expected_vacancy_index is not None:
+        if expected_count != 5 or expected_spacing_nm != 80 or expected_vacancy_index not in (2, 4):
+            raise ValueError('The vacancy comparison requires nominal N=5, d=80 nm and missing index 2 or 4.')
+        expected = np.delete((np.arange(5)-2)*.08, expected_vacancy_index)
+        if (len(centres) != 4 or not np.allclose(centres[:, 0], expected, rtol=0, atol=1e-12)
+                or not np.allclose(centres[:, 1:], [.02, 0], rtol=0, atol=1e-12)):
+            raise ValueError(f'{directory}: occupied positions do not match missing index {expected_vacancy_index}.')
     if expected_central_shift_nm is not None:
         if (expected_count != 5 or expected_spacing_nm != 80
                 or expected_central_shift_nm not in (0, 4, 8, 16)):
@@ -94,6 +104,7 @@ def read_run(directory, expected_count, *, expected_spacing_nm=80, expected_cent
     return dict(directory=directory, config=config, count=expected_count, coordinates=coordinates,
                 spacing_nm=float(g['spacing_um']*1000) if expected_count > 1 else None,
                 central_shift_nm=float(expected_central_shift_nm) if expected_central_shift_nm is not None else None,
+                active_count=len(centres), vacancy_index=expected_vacancy_index,
                 wavelengths=wavelengths, grid=np.unique(wavelengths), values=values, centres=centres,
                 first_x=float(np.min(centres[:, 0])), radius=float(g['particle_radius_um']),
                 resolution=float(profile['broadband_resolution']),

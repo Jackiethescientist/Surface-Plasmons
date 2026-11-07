@@ -24,6 +24,7 @@ class ProjectConfigError(ValueError):
 # An execution capability marker; it is not a numerical-validation claim.
 RESEARCH_DIELECTRIC_LINE_SUPPORTED = True
 RESEARCH_PARTIAL_MIRRORS_SUPPORTED = True
+RESEARCH_VACANCIES_SUPPORTED = True
 
 
 PRECISION_MODES: dict[str, dict[str, float | int]] = {
@@ -268,6 +269,15 @@ def cell_size_um(config: Mapping[str, Any]) -> tuple[float, float, float]:
     parameters = geometry_parameters(config, include_particles=True)
     extents = line_extents({**parameters, "center": (0.0, 0.0, 0.0)})
     numerics = config["numerics"]
+    minimum = numerics.get('minimum_geometry_extent_um')
+    if minimum is not None:
+        if (not isinstance(minimum, (list, tuple)) or len(minimum) != 3
+                or any(isinstance(v, bool) or not isinstance(v, (int, float))
+                       or not math.isfinite(v) or v <= 0 for v in minimum)):
+            raise ProjectConfigError('minimum_geometry_extent_um must contain three finite positive lengths.')
+        # Preserve the nominal structure envelope after a vacancy. Padding
+        # is still added below, so domain-convergence runs grow the cell.
+        extents = tuple(max(float(actual), float(requested)) for actual, requested in zip(extents, minimum))
     margin = 2.0 * (float(numerics["padding_um"]) + float(numerics["pml_thickness_um"]))
     return tuple(float(value + margin) for value in extents)
 
@@ -291,6 +301,16 @@ def _monitor_geometry(config: Mapping[str, Any], *, full_volume: bool) -> tuple[
         probe_y = float(measurement.get("probe_line_y_um", probe_y))
         centre = [0.5 * (min_x + max_x), probe_y, 0.0]
         size = [max_x - min_x + 2.0 * margin, 0.0, 0.0]
+        for key in ('probe_line_x_center_um', 'probe_line_span_um'):
+            if key in measurement:
+                value = measurement[key]
+                if (isinstance(value, bool) or not isinstance(value, (int, float))
+                        or not math.isfinite(value) or (key == 'probe_line_span_um' and value <= 0)):
+                    raise ProjectConfigError(f'measurement.{key} must be finite; a span must be positive.')
+        if 'probe_line_x_center_um' in measurement:
+            centre[0] = float(measurement['probe_line_x_center_um'])
+        if 'probe_line_span_um' in measurement:
+            size[0] = float(measurement['probe_line_span_um'])
         return centre, size
     margin = float(measurement["field_map_margin_um"])
     height = float(measurement["field_map_height_um"])
