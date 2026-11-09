@@ -1,0 +1,65 @@
+{
+  "coordinate_frame": "xi = x - leftmost sphere centre x; not equal absolute laboratory x",
+  "measurement": "complex scattered E / common complex Eref; no intensity squaring",
+  "interpolation": "real and imaginary parts interpolated separately inside eligible left-exterior samples",
+  "offsets_nm": [
+    -45.0,
+    -40.0,
+    -35.0,
+    -30.0
+  ],
+  "primary_plot_probe_nm": -40.0,
+  "polarisation": "Ex",
+  "no_new_simulations_started": true,
+  "numerical_acceptance_note": "A count comparison does not establish convergence; review each run separately.",
+  "cases": [
+    {
+      "particle_count": 1,
+      "result_folder": "/mnt/c/Users/jacqu/OneDrive/Documents/Surface_Plasmons/data/results/control_sphere_v16_ex",
+      "leftmost_sphere_x_nm": 0.0,
+      "theory_agreement": "passed",
+      "model_applicability": "passed",
+      "numerical_convergence": {
+        "resolution": "not_established_in_this_folder",
+        "domain": "not_established_in_this_folder",
+        "time": "not_established_in_this_folder"
+      }
+    },
+    {
+      "particle_count": 2,
+      "result_folder": "/mnt/c/Users/jacqu/OneDrive/Documents/Surface_Plasmons/data/results/pair80_ex",
+      "leftmost_sphere_x_nm": -40.0,
+      "theory_agreement": "passed",
+      "model_applicability": "outside_applicability_checks",
+      "numerical_convergence": {
+        "resolution": "not_established_in_this_folder",
+        "domain": "not_established_in_this_folder",
+        "time": "not_established_in_this_folder"
+      }
+    },
+    {
+      "particle_count": 3,
+      "result_folder": "/mnt/c/Users/jacqu/OneDrive/Documents/Surface_Plasmons/data/results/chain3_80_ex",
+      "leftmost_sphere_x_nm": -80.0,
+      "theory_agreement": "passed",
+      "model_applicability": "outside_applicability_checks",
+      "numerical_convergence": {
+        "resolution": "not_established_in_this_folder",
+        "domain": "not_established_in_this_folder",
+        "time": "not_established_in_this_folder"
+      }
+    },
+    {
+      "particle_count": 5,
+      "result_folder": "/mnt/c/Users/jacqu/OneDrive/Documents/Surface_Plasmons/data/results/chain5_80_ex",
+      "leftmost_sphere_x_nm": -160.0,
+      "theory_agreement": "passed",
+      "model_applicability": "outside_applicability_checks",
+      "numerical_convergence": {
+        "resolution": "not_established_in_this_folder",
+        "domain": "not_established_in_this_folder",
+        "time": "not_established_in_this_folder"
+      }
+    }
+  ]
+}

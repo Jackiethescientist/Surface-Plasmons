@@ -1,0 +1,139 @@
+{
+  "nominal_spacing_nm": 80,
+  "particle_radius_nm": 20,
+  "polarisation": "Ex",
+  "fixed_gap_probes_nm": [
+    -40,
+    40
+  ],
+  "fixed_gap_cases": [
+    "perfect",
+    "middle",
+    "end"
+  ],
+  "fixed_gap_exclusion": "The regular four-sphere control has spheres at x=-40,+40 nm and is omitted from these exterior probes.",
+  "end_probes": "40 nm from each actual left/right end-sphere centre, 20 nm outside its surface; coordinates differ between arrangements",
+  "translation_applied_to_regular4_nm": -40.00000000000001,
+  "translation_relative_l2_difference": 9.135134712842061e-08,
+  "translation_interpretation": "The end vacancy and regular four-sphere array are physically equivalent after x translation. Differences after alignment are numerical consistency diagnostics; the finite PML cells and mirror setups do not translate with the plotted coordinates. Review domain/resolution/time convergence.",
+  "numerical_acceptance_note": "These graphs do not establish numerical convergence or electrostatic applicability.",
+  "no_new_simulations_started": true,
+  "cases": [
+    {
+      "case": "perfect",
+      "nominal_particle_count": 5,
+      "active_particle_count": 5,
+      "missing_particle_index": null,
+      "result_folder": "/mnt/c/Users/jacqu/OneDrive/Documents/Surface_Plasmons/data/results/chain5_80_ex",
+      "sphere_x_nm": [
+        -160.0,
+        -80.0,
+        0.0,
+        79.99999999999999,
+        160.0
+      ],
+      "cell_size_um": [
+        1.0,
+        0.7,
+        0.68
+      ],
+      "mirror_axes": [
+        "x",
+        "z"
+      ],
+      "theory_agreement": "passed",
+      "model_applicability": "outside_applicability_checks",
+      "numerical_convergence": {
+        "resolution": "not_established_in_this_folder",
+        "domain": "not_established_in_this_folder",
+        "time": "not_established_in_this_folder"
+      }
+    },
+    {
+      "case": "middle",
+      "nominal_particle_count": 5,
+      "active_particle_count": 4,
+      "missing_particle_index": 2,
+      "result_folder": "/mnt/c/Users/jacqu/OneDrive/Documents/Surface_Plasmons/data/results/chain5_missing_middle_ex",
+      "sphere_x_nm": [
+        -160.0,
+        -80.0,
+        79.99999999999999,
+        160.0
+      ],
+      "cell_size_um": [
+        1.0,
+        0.7,
+        0.68
+      ],
+      "mirror_axes": [
+        "x",
+        "z"
+      ],
+      "theory_agreement": "passed",
+      "model_applicability": "outside_applicability_checks",
+      "numerical_convergence": {
+        "resolution": "not_established_in_this_folder",
+        "domain": "not_established_in_this_folder",
+        "time": "not_established_in_this_folder"
+      }
+    },
+    {
+      "case": "end",
+      "nominal_particle_count": 5,
+      "active_particle_count": 4,
+      "missing_particle_index": 4,
+      "result_folder": "/mnt/c/Users/jacqu/OneDrive/Documents/Surface_Plasmons/data/results/chain5_missing_end_ex",
+      "sphere_x_nm": [
+        -160.0,
+        -80.0,
+        0.0,
+        79.99999999999999
+      ],
+      "cell_size_um": [
+        1.0,
+        0.7,
+        0.68
+      ],
+      "mirror_axes": [
+        "z"
+      ],
+      "theory_agreement": "passed",
+      "model_applicability": "outside_applicability_checks",
+      "numerical_convergence": {
+        "resolution": "not_established_in_this_folder",
+        "domain": "not_established_in_this_folder",
+        "time": "not_established_in_this_folder"
+      }
+    },
+    {
+      "case": "four",
+      "nominal_particle_count": 4,
+      "active_particle_count": 4,
+      "missing_particle_index": null,
+      "result_folder": "/mnt/c/Users/jacqu/OneDrive/Documents/Surface_Plasmons/data/results/chain4_regular_ex",
+      "sphere_x_nm": [
+        -120.0,
+        -39.99999999999999,
+        40.00000000000001,
+        120.0
+      ],
+      "cell_size_um": [
+        1.0,
+        0.7,
+        0.68
+      ],
+      "mirror_axes": [
+        "x",
+        "z"
+      ],
+      "theory_agreement": "passed",
+      "model_applicability": "outside_applicability_checks",
+      "numerical_convergence": {
+        "resolution": "not_established_in_this_folder",
+        "domain": "not_established_in_this_folder",
+        "time": "not_established_in_this_folder"
+      }
+    }
+  ]
+}

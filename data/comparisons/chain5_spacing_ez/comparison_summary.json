@@ -1,0 +1,64 @@
+{
+  "particle_count": 5,
+  "spacings_nm": [
+    60,
+    80,
+    100
+  ],
+  "surface_gaps_nm": [
+    20,
+    40,
+    60
+  ],
+  "polarisation": "Ez",
+  "coordinate_frame": "xi = x - leftmost sphere centre x",
+  "offsets_nm": [
+    -45.0,
+    -40.0,
+    -35.0,
+    -30.0
+  ],
+  "primary_plot_probe_nm": -40.0,
+  "measurement": "complex scattered E / common complex Eref; field amplitude is not squared",
+  "interpolation": "real and imaginary parts interpolated separately inside eligible exterior samples",
+  "no_new_simulations_started": true,
+  "numerical_acceptance_note": "Review per-case convergence and compare physical differences with numerical changes.",
+  "cases": [
+    {
+      "centre_spacing_nm": 60.0,
+      "result_folder": "/mnt/c/Users/jacqu/OneDrive/Documents/Surface_Plasmons/data/results/chain5_60_ez",
+      "leftmost_sphere_x_nm": -120.0,
+      "theory_agreement": "passed",
+      "model_applicability": "outside_applicability_checks",
+      "numerical_convergence": {
+        "resolution": "not_established_in_this_folder",
+        "domain": "not_established_in_this_folder",
+        "time": "not_established_in_this_folder"
+      }
+    },
+    {
+      "centre_spacing_nm": 80.0,
+      "result_folder": "/mnt/c/Users/jacqu/OneDrive/Documents/Surface_Plasmons/data/results/chain5_80_ez",
+      "leftmost_sphere_x_nm": -160.0,
+      "theory_agreement": "passed",
+      "model_applicability": "outside_applicability_checks",
+      "numerical_convergence": {
+        "resolution": "not_established_in_this_folder",
+        "domain": "not_established_in_this_folder",
+        "time": "not_established_in_this_folder"
+      }
+    },
+    {
+      "centre_spacing_nm": 100.0,
+      "result_folder": "/mnt/c/Users/jacqu/OneDrive/Documents/Surface_Plasmons/data/results/chain5_100_ez",
+      "leftmost_sphere_x_nm": -200.0,
+      "theory_agreement": "passed",
+      "model_applicability": "outside_applicability_checks",
+      "numerical_convergence": {
+        "resolution": "not_established_in_this_folder",
+        "domain": "not_established_in_this_folder",
+        "time": "not_established_in_this_folder"
+      }
+    }
+  ]
+}

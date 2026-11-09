@@ -1,0 +1,104 @@
+{
+  "nominal_spacing_nm": 80,
+  "particle_count": 5,
+  "shifted_particle_index": 2,
+  "central_shifts_nm": [
+    0,
+    4,
+    8,
+    16
+  ],
+  "shift_percentages": [
+    0,
+    5,
+    10,
+    20
+  ],
+  "polarisation": "Ex",
+  "fixed_probe_x_nm": [
+    -200.0,
+    -40.0,
+    48.0,
+    200.0
+  ],
+  "coordinate_frame": "fixed laboratory x, relative to the original central sphere centre x=0; y=20 nm, z=0",
+  "measurement": "complex scattered E/Eref; amplitudes are not squared",
+  "physical_change_definition": "norm(S_shifted-S_perfect)/norm(S_perfect); not a theory-agreement error",
+  "no_new_simulations_started": true,
+  "numerical_acceptance_note": "Each new defect geometry requires numerical convergence; the 4 nm shift is only 1.2 grid cells at resolution 300/um.",
+  "cases": [
+    {
+      "central_shift_nm": 0.0,
+      "result_folder": "/mnt/c/Users/jacqu/OneDrive/Documents/Surface_Plasmons/data/results/chain5_80_ex",
+      "adjacent_centre_spacings_nm": [
+        80.0,
+        80.0
+      ],
+      "mirror_axes": [
+        "x",
+        "z"
+      ],
+      "theory_agreement": "passed",
+      "model_applicability": "outside_applicability_checks",
+      "numerical_convergence": {
+        "resolution": "not_established_in_this_folder",
+        "domain": "not_established_in_this_folder",
+        "time": "not_established_in_this_folder"
+      }
+    },
+    {
+      "central_shift_nm": 4.0,
+      "result_folder": "/mnt/c/Users/jacqu/OneDrive/Documents/Surface_Plasmons/data/results/chain5_dx4_ex",
+      "adjacent_centre_spacings_nm": [
+        84.0,
+        76.0
+      ],
+      "mirror_axes": [
+        "z"
+      ],
+      "theory_agreement": "passed",
+      "model_applicability": "outside_applicability_checks",
+      "numerical_convergence": {
+        "resolution": "not_established_in_this_folder",
+        "domain": "not_established_in_this_folder",
+        "time": "not_established_in_this_folder"
+      }
+    },
+    {
+      "central_shift_nm": 8.0,
+      "result_folder": "/mnt/c/Users/jacqu/OneDrive/Documents/Surface_Plasmons/data/results/chain5_dx8_ex",
+      "adjacent_centre_spacings_nm": [
+        88.0,
+        72.0
+      ],
+      "mirror_axes": [
+        "z"
+      ],
+      "theory_agreement": "passed",
+      "model_applicability": "outside_applicability_checks",
+      "numerical_convergence": {
+        "resolution": "not_established_in_this_folder",
+        "domain": "not_established_in_this_folder",
+        "time": "not_established_in_this_folder"
+      }
+    },
+    {
+      "central_shift_nm": 16.0,
+      "result_folder": "/mnt/c/Users/jacqu/OneDrive/Documents/Surface_Plasmons/data/results/chain5_dx16_ex",
+      "adjacent_centre_spacings_nm": [
+        96.0,
+        64.0
+      ],
+      "mirror_axes": [
+        "z"
+      ],
+      "theory_agreement": "passed",
+      "model_applicability": "outside_applicability_checks",
+      "numerical_convergence": {
+        "resolution": "not_established_in_this_folder",
+        "domain": "not_established_in_this_folder",
+        "time": "not_established_in_this_folder"
+      }
+    }
+  ]
+}
